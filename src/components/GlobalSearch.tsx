@@ -11,7 +11,7 @@ interface SearchResult {
     path: string;
 }
 
-export default function GlobalSearch() {
+export default function GlobalSearch({ isMobile, onSearchClose }: { isMobile?: boolean, onSearchClose?: () => void }) {
     const [query, setQuery] = useState('');
     const [results, setResults] = useState<SearchResult[]>([]);
     const [loading, setLoading] = useState(false);
@@ -105,6 +105,7 @@ export default function GlobalSearch() {
     }, [query]);
 
     const handleResultClick = (path: string) => {
+        if (onSearchClose) onSearchClose();
         setIsOpen(false);
         setQuery('');
         navigate(path);
@@ -120,16 +121,16 @@ export default function GlobalSearch() {
     };
 
     return (
-        <div ref={wrapperRef} className="relative w-full max-w-sm ml-4 hidden md:block">
+        <div ref={wrapperRef} className={`relative w-full max-w-sm ${isMobile ? "" : "ml-4 hidden md:block"}`}>
             <div className="relative">
-                <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-white/50" />
+                <Search className={`w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 ${isMobile ? "text-slate-400" : "text-white/50"}`} />
                 <input
                     type="text"
                     value={query}
                     onChange={(e) => setQuery(e.target.value)}
                     onFocus={() => { if (query.trim().length >= 2) setIsOpen(true); }}
                     placeholder="Søk globalt..."
-                    className="w-full bg-black/10 border border-white/20 text-white placeholder:text-white/60 rounded-xl pl-9 pr-4 py-2 font-medium focus:outline-none focus:ring-2 focus:ring-white/30 focus:border-transparent transition-all text-sm"
+                    className={`w-full ${isMobile ? "bg-white border-slate-300 text-slate-900 placeholder:text-slate-400 focus:ring-primary-500/50 focus:border-primary-500 py-3" : "bg-black/10 border-white/20 text-white placeholder:text-white/60 focus:ring-white/30 focus:border-transparent py-2"} border rounded-xl pl-9 pr-4 font-medium focus:outline-none focus:ring-2 transition-all text-sm`}
                 />
             </div>
 
