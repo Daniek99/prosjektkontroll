@@ -8,6 +8,7 @@ export default function Financials() {
     const { selectedSubcontractorId } = useSubcontractor();
     const [cos, setCos] = useState<any[]>([]);
     const [contract, setContract] = useState<any>({ original: 0, current: 0 });
+    const [progressPercent, setProgressPercent] = useState<number>(0);
     const [loading, setLoading] = useState(true);
     const [showModal, setShowModal] = useState(false);
     const [newCO, setNewCO] = useState({ title: '', amount: 0, status: 'open' });
@@ -31,6 +32,31 @@ export default function Financials() {
             if (cosData) setCos(cosData);
 
             const approvedCOs = cosData?.filter(co => co.status === 'approved').reduce((acc, co) => acc + Number(co.amount), 0) || 0;
+
+            const { data: gridRes } = await supabase
+                .from('project_progress_grid')
+                .select('grid_data')
+                .eq('subcontractor_id', selectedSubcontractorId)
+                .maybeSingle();
+
+            let percentage = 0;
+            if (gridRes && gridRes.grid_data) {
+                const gData = gridRes.grid_data as any;
+                const plans = gData.plans || [];
+                const activePlan = plans.find((p: any) => p.id === gData.activePlanId) || plans[0];
+                const cells = activePlan?.grid?.cells || {};
+                const totalCells = Object.keys(cells).length;
+                if (totalCells > 0) {
+                    let completed = 0;
+                    let inProgress = 0;
+                    Object.values(cells).forEach((c: any) => {
+                        if (c?.status === 'completed') completed++;
+                        else if (c?.status === 'in_progress') inProgress++;
+                    });
+                    percentage = (completed + (inProgress * 0.5)) / totalCells;
+                }
+            }
+            setProgressPercent(percentage);
 
             setContract({
                 original: Number(sub?.original_contract_value || 0),
@@ -97,7 +123,7 @@ export default function Financials() {
                 </button>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
                 <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-200/60 flex items-center relative overflow-hidden group hover:border-slate-300 transition-colors">
                     <div className="w-2 bg-slate-300 absolute left-0 top-0 bottom-0 group-hover:bg-slate-400 transition-colors" />
                     <div className="bg-slate-100 p-4 rounded-xl mr-5 flex-shrink-0 group-hover:bg-slate-200 transition-colors">
@@ -116,7 +142,21 @@ export default function Financials() {
                     <div>
                         <p className="text-xs font-bold text-primary-200 uppercase tracking-widest mb-1">Nåværende Verdi</p>
                         <h2 className="text-4xl font-extrabold tracking-tight">kr {contract.current.toLocaleString('no-NO')}</h2>
-                    </div>         </div>
+                    </div>
+                </div>
+                <div className="bg-slate-900 p-6 rounded-3xl shadow-lg shadow-slate-900/30 text-white flex items-center relative overflow-hidden group">
+                    <div className="absolute -right-6 -top-6 w-32 h-32 bg-white opacity-5 rounded-full blur-2xl pointer-events-none group-hover:opacity-10 transition-opacity" />
+                    <div className="bg-slate-800 p-4 rounded-xl mr-5 flex-shrink-0 backdrop-blur-sm border border-slate-700/50">
+                        <Calculator className="w-7 h-7 text-emerald-400" />
+                    </div>
+                    <div>
+                        <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1 flex items-center gap-2">
+                            Økonomisk Ferdiggrad (EV)
+                            <span className="bg-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded-md text-[10px]">{Math.round(progressPercent * 100)}%</span>
+                        </p>
+                        <h2 className="text-4xl font-extrabold tracking-tight text-emerald-400">kr {Math.round(contract.original * progressPercent).toLocaleString('no-NO')}</h2>
+                    </div>
+                </div>
             </div>
 
             <div className="bg-white border border-slate-200/60 rounded-3xl shadow-sm overflow-hidden">

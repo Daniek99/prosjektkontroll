@@ -208,5 +208,9 @@ CREATE POLICY "Allow authenticated full access to subcontractor_areas" ON subcon
 -- CREATE POLICY "Users can manage their own tasks" ON user_tasks FOR ALL TO authenticated USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
 
 -- CREATE TABLE IF NOT EXISTS contacts ( id UUID PRIMARY KEY DEFAULT uuid_generate_v4(), name TEXT NOT NULL, role TEXT, email TEXT NOT NULL, phone TEXT, subcontractor_id UUID REFERENCES subcontractors(id) ON DELETE SET NULL, created_by UUID REFERENCES auth.users(id), created_at TIMESTAMPTZ DEFAULT NOW(), updated_at TIMESTAMPTZ DEFAULT NOW() );
--- ALTER TABLE contacts ENABLE ROW LEVEL SECURITY;
 -- CREATE POLICY "Allow authenticated full access to contacts" ON contacts FOR ALL TO authenticated USING (true) WITH CHECK (true);
+
+-- Phase 11 Migrations: Decision Logs
+-- CREATE TABLE IF NOT EXISTS decision_logs ( id UUID PRIMARY KEY DEFAULT uuid_generate_v4(), subcontractor_id UUID REFERENCES subcontractors(id) ON DELETE SET NULL, area_id UUID REFERENCES global_areas(id) ON DELETE SET NULL, subject TEXT NOT NULL, content TEXT, date DATE NOT NULL DEFAULT CURRENT_DATE, created_by UUID REFERENCES auth.users(id), created_at TIMESTAMPTZ DEFAULT NOW(), updated_at TIMESTAMPTZ DEFAULT NOW() );
+-- ALTER TABLE decision_logs ENABLE ROW LEVEL SECURITY;
+-- CREATE POLICY "Allow authenticated full access to decision_logs" ON decision_logs FOR ALL TO authenticated USING (true) WITH CHECK (true);

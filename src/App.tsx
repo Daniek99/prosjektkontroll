@@ -15,6 +15,7 @@ import Bemanning from './pages/Bemanning';
 import Risks from './pages/Risks';
 import Contracts from './pages/Contracts';
 import Areas from './pages/Areas';
+import Decisions from './pages/Decisions';
 import Diary from './pages/Diary';
 import Contacts from './pages/Contacts';
 import Statistics from './pages/Statistics';
@@ -42,6 +43,7 @@ function App() {
                   <Route path="/risks" element={<Risks />} />
                   <Route path="/contracts" element={<Contracts />} />
                   <Route path="/areas" element={<Areas />} />
+                  <Route path="/decisions" element={<Decisions />} />
                   <Route path="/diary" element={<Diary />} />
                   <Route path="/contacts" element={<Contacts />} />
                   <Route path="/statistics" element={<Statistics />} />

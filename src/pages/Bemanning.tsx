@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useSubcontractor } from '../contexts/SubcontractorContext';
 import { supabase } from '../lib/supabase';
-import { Users, Plus, ClipboardList, ChevronLeft, ChevronRight, X, Clock, Edit2, Settings, Trash2, Check } from 'lucide-react';
+import { Users, Plus, Minus, ClipboardList, ChevronLeft, ChevronRight, X, Clock, Edit2, Settings, Trash2, Check } from 'lucide-react';
 
 export default function Bemanning() {
     const { selectedSubcontractorId } = useSubcontractor();
@@ -40,8 +40,7 @@ export default function Bemanning() {
         billable_workers: number | string;
         notes: string;
         billable_comment: string;
-        activity_id: string | null;
-        hours_billable: number | string;
+        billable_activities: Array<{ activity_id: string, hours: string | number }>;
         position_ids: string[];
     }>({
         date: (() => {
@@ -55,8 +54,7 @@ export default function Bemanning() {
         billable_workers: '',
         notes: '',
         billable_comment: '',
-        activity_id: null,
-        hours_billable: '',
+        billable_activities: [],
         position_ids: []
     });
 
@@ -68,8 +66,6 @@ export default function Bemanning() {
         const month = String(now.getMonth() + 1).padStart(2, '0');
         const day = String(now.getDate()).padStart(2, '0');
         const dateStr = `${year}-${month}-${day}`;
-        const dayOfWeek = now.getDay();
-        const defaultHours = (dayOfWeek >= 1 && dayOfWeek <= 4) ? 8 : (dayOfWeek === 5) ? 5.5 : 0;
         
         setNewManpower({
             date: dateStr,
@@ -77,8 +73,7 @@ export default function Bemanning() {
             billable_workers: '',
             notes: '',
             billable_comment: '',
-            activity_id: null,
-            hours_billable: defaultHours,
+            billable_activities: [],
             position_ids: []
         });
     };
@@ -167,7 +162,7 @@ export default function Bemanning() {
             setNewActivityChangeOrder('');
             setShowQuickAddActivity(false);
             // Auto-select the new activity
-            setNewManpower({ ...newManpower, activity_id: data[0].id });
+            setNewManpower({ ...newManpower, billable_activities: [...newManpower.billable_activities, { activity_id: data[0].id, hours: '' }] });
         } else {
             alert('Kunne ikke legge til aktivitet. Prøv igjen.');
         }
@@ -236,17 +231,21 @@ export default function Bemanning() {
         e.preventDefault();
         setLoading(true);
 
+        const validActivities = newManpower.billable_activities.filter(act => act.activity_id);
         const payload = {
+            id: newManpower.id || undefined,
             subcontractor_id: selectedSubcontractorId,
             date: newManpower.date,
+            workers_count: (Number(newManpower.contract_workers) || 0) + (Number(newManpower.billable_workers) || 0),
             contract_workers: Number(newManpower.contract_workers) || 0,
             billable_workers: Number(newManpower.billable_workers) || 0,
-            workers_count: (Number(newManpower.contract_workers) || 0) + (Number(newManpower.billable_workers) || 0),
+            is_contract_work: Number(newManpower.contract_workers) > 0,
             notes: newManpower.notes,
             billable_comment: newManpower.billable_comment,
-            activity_id: newManpower.activity_id || null,
+            activity_id: validActivities.length === 1 ? validActivities[0].activity_id : null,
             hours_contract: 0,
-            hours_billable: Number(newManpower.hours_billable) || 0
+            hours_billable: validActivities.reduce((sum, act) => sum + (Number(act.hours) || 0), 0),
+            billable_activities: validActivities
         };
 
         let response;
@@ -405,21 +404,17 @@ export default function Bemanning() {
                                                         billable_workers: log.billable_workers ?? '',
                                                         notes: log.notes || '',
                                                         billable_comment: log.billable_comment || log.comment || '',
-                                                        activity_id: log.activity_id || null,
-                                                        hours_billable: log.hours_billable ?? '',
+                                                        billable_activities: log.billable_activities || (log.activity_id ? [{ activity_id: log.activity_id, hours: log.hours_billable }] : []),
                                                         position_ids: positionIds
                                                     });
                                                 } else {
-                                                    const dayOfWeek = new Date(dateStr).getDay();
-                                                    const defaultHours = (dayOfWeek >= 1 && dayOfWeek <= 4) ? 8 : (dayOfWeek === 5) ? 5.5 : 0;
                                                     setNewManpower({
                                                         date: dateStr,
                                                         contract_workers: '',
                                                         billable_workers: '',
                                                         notes: '',
                                                         billable_comment: '',
-                                                        activity_id: null,
-                                                        hours_billable: defaultHours,
+                                                        billable_activities: [],
                                                         position_ids: []
                                                     });
                                                 }
@@ -511,21 +506,17 @@ export default function Bemanning() {
                                                         billable_workers: log.billable_workers ?? '',
                                                         notes: log.notes || '',
                                                         billable_comment: log.billable_comment || log.comment || '',
-                                                        activity_id: log.activity_id || null,
-                                                        hours_billable: log.hours_billable ?? '',
+                                                        billable_activities: log.billable_activities || (log.activity_id ? [{ activity_id: log.activity_id, hours: log.hours_billable }] : []),
                                                         position_ids: positionIds
                                                     });
                                                 } else {
-                                                    const dayOfWeek = new Date(dateStr).getDay();
-                                                    const defaultHours = (dayOfWeek >= 1 && dayOfWeek <= 4) ? 8 : (dayOfWeek === 5) ? 5.5 : 0;
                                                     setNewManpower({
                                                         date: dateStr,
                                                         contract_workers: '',
                                                         billable_workers: '',
                                                         notes: '',
                                                         billable_comment: '',
-                                                        activity_id: null,
-                                                        hours_billable: defaultHours,
+                                                        billable_activities: [],
                                                         position_ids: []
                                                     });
                                                 }
@@ -574,11 +565,15 @@ export default function Bemanning() {
                                     <div className="flex-1">
                                         <div className="flex items-center gap-3 mb-1">
                                             <span className="font-extrabold text-slate-900">{new Date(log.date).toLocaleDateString('no-NO')}</span>
-                                            {activity && (
+                                            {log.billable_activities?.length > 1 ? (
+                                                <span className="px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-widest bg-primary-100 text-primary-700">
+                                                    Flere Aktiviteter
+                                                </span>
+                                            ) : activity ? (
                                                 <span className="px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-widest bg-primary-100 text-primary-700">
                                                     {activity.name}
                                                 </span>
-                                            )}
+                                            ) : null}
                                             <span className="px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-widest bg-slate-100 text-slate-600">
                                                 Totalt {(log.contract_workers || 0) + (log.billable_workers || 0)}
                                             </span>
@@ -593,19 +588,41 @@ export default function Bemanning() {
                                                 <span className="font-bold mr-1">{log.billable_workers || 0}</span> Regning
                                             </div>
                                         </div>
-                                        {(log.hours_billable > 0) && (
-                                            <div className="flex items-center gap-4 text-sm text-slate-600 mb-2">
-                                                <div className="flex items-center">
-                                                    <Clock className="w-3 h-3 mr-1 text-amber-500" />
-                                                    <span className="font-bold mr-1">{log.hours_billable || 0}</span> regningstimer
+                                        {(log.billable_activities && log.billable_activities.length > 0) ? (
+                                            <div className="mb-2 space-y-1">
+                                                {log.billable_activities.map((act: any, i: number) => {
+                                                    const actDetails = activities.find((a: any) => a.id === act.activity_id);
+                                                    return (
+                                                        <div key={i} className="flex items-center gap-2 text-sm text-slate-600">
+                                                            <Clock className="w-3 h-3 text-amber-500" />
+                                                            <span className="font-bold text-amber-700">{act.hours}t</span>
+                                                            {actDetails ? (
+                                                                <span className="px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-widest bg-primary-50 text-primary-700 border border-primary-100">
+                                                                    {actDetails.name} {actDetails.change_order_number ? `(${actDetails.change_order_number})` : ''}
+                                                                </span>
+                                                            ) : (
+                                                                <span className="px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-widest bg-slate-100 text-slate-600">
+                                                                    Ukjent aktivitet
+                                                                </span>
+                                                            )}
+                                                        </div>
+                                                    )
+                                                })}
+                                            </div>
+                                        ) : (
+                                            log.hours_billable > 0 && (
+                                                <div className="flex items-center gap-4 text-sm text-slate-600 mb-2">
+                                                    <div className="flex items-center">
+                                                        <Clock className="w-3 h-3 mr-1 text-amber-500" />
+                                                        <span className="font-bold mr-1">{log.hours_billable || 0}</span> regningstimer
+                                                    </div>
+                                                    {log.activity_id && activities.find(a => a.id === log.activity_id) && (
+                                                        <span className="px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-widest bg-primary-50 text-primary-700">
+                                                            {activities.find(a => a.id === log.activity_id)?.name}
+                                                        </span>
+                                                    )}
                                                 </div>
-                                            </div>
-                                        )}
-                                        {activity?.change_order_number && (
-                                            <div className="text-sm text-slate-600 bg-blue-50/50 p-2 rounded-lg border border-blue-100 mb-2">
-                                                <span className="font-bold block mb-0.5 text-xs text-blue-800">Endringsmelding:</span>
-                                                {activity.change_order_number}
-                                            </div>
+                                            )
                                         )}
                                         {((log.billable_workers > 0 && log.billable_comment) || (log.is_contract_work === false && log.comment)) && (
                                             <div className="text-sm text-slate-600 bg-amber-50/50 p-2 rounded-lg border border-amber-100 mb-2">
@@ -627,8 +644,7 @@ export default function Bemanning() {
                                                 billable_workers: log.billable_workers ?? '',
                                                 notes: log.notes || '',
                                                 billable_comment: log.billable_comment || log.comment || '',
-                                                activity_id: log.activity_id || null,
-                                                hours_billable: log.hours_billable ?? '',
+                                                billable_activities: log.billable_activities || (log.activity_id ? [{ activity_id: log.activity_id, hours: log.hours_billable }] : []),
                                                 position_ids: positionIds
                                             });
                                             setShowManpowerModal(true);
@@ -664,124 +680,218 @@ export default function Bemanning() {
                                     value={newManpower.date}
                                     onChange={(e) => {
                                         const newDate = e.target.value;
-                                        const defaultHours = Number(newManpower.billable_workers) > 0 ? getDefaultHours(newDate, Number(newManpower.billable_workers)) : 0;
-                                        setNewManpower({ ...newManpower, date: newDate, hours_billable: defaultHours || newManpower.hours_billable });
+                                        setNewManpower({ ...newManpower, date: newDate, /* hours_billable removed */ });
                                     }}
                                     className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500 transition-all"
                                 />
                             </div>
 
-                            {/* Activity Selection */}
-                            <div>
-                                <div className="flex items-center justify-between mb-1">
-                                    <label className="block text-sm font-bold text-slate-700">Aktivitet (for regningsarbeid)</label>
-                                    <button
-                                        type="button"
-                                        onClick={() => setShowQuickAddActivity(!showQuickAddActivity)}
-                                        className="text-xs text-primary-600 hover:text-primary-700 font-bold flex items-center"
-                                    >
-                                        <Plus className="w-3 h-3 mr-1" />
-                                        Ny aktivitet
-                                    </button>
-                                </div>
-                                
-                                {showQuickAddActivity ? (
-                                    <div className="bg-primary-50 p-4 rounded-xl border border-primary-200 space-y-3">
-                                        <input
-                                            type="text"
-                                            value={newActivityName}
-                                            onChange={(e) => setNewActivityName(e.target.value)}
-                                            className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-primary-500/50"
-                                            placeholder="Navn på aktivitet *"
-                                        />
-                                        <input
-                                            type="text"
-                                            value={newActivityDesc}
-                                            onChange={(e) => setNewActivityDesc(e.target.value)}
-                                            className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-primary-500/50"
-                                            placeholder="Beskrivelse (valgfritt)"
-                                        />
-                                        <input
-                                            type="text"
-                                            value={newActivityChangeOrder}
-                                            onChange={(e) => setNewActivityChangeOrder(e.target.value)}
-                                            className="w-full bg-white border border-blue-200 rounded-lg px-3 py-2 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500/50"
-                                            placeholder="Endringsmelding nummer (f.eks. EM-001)"
-                                        />
-                                        <div className="flex gap-2">
+                            {/* Activities and Hours Section */}
+                            {Number(newManpower.billable_workers) > 0 && (
+                                <div className="space-y-4 pt-4 border-t border-slate-100">
+                                    <div className="flex items-center justify-between mb-1">
+                                        <label className="block text-sm font-bold text-slate-700 uppercase tracking-widest">Aktiviteter for regningsarbeid</label>
+                                        <div className="flex gap-4">
                                             <button
                                                 type="button"
-                                                onClick={handleAddActivity}
-                                                disabled={!newActivityName.trim()}
-                                                className="flex-1 px-3 py-2 bg-primary-600 text-white text-sm font-bold rounded-lg hover:bg-primary-700 transition-colors disabled:opacity-50"
+                                                onClick={() => setShowQuickAddActivity(!showQuickAddActivity)}
+                                                className="text-xs text-primary-600 hover:text-primary-700 font-bold flex items-center p-1"
                                             >
-                                                Opprett aktivitet
-                                            </button>
-                                            <button
-                                                type="button"
-                                                onClick={() => {
-                                                    setShowQuickAddActivity(false);
-                                                    setNewActivityName('');
-                                                    setNewActivityDesc('');
-                                                    setNewActivityChangeOrder('');
-                                                }}
-                                                className="px-3 py-2 bg-slate-200 text-slate-700 text-sm font-bold rounded-lg hover:bg-slate-300 transition-colors"
-                                            >
-                                                Avbryt
+                                                <Plus className="w-4 h-4 mr-1" />
+                                                Ny aktivitet
                                             </button>
                                         </div>
                                     </div>
-                                ) : (
-                                    <>
-                                        <select
-                                            value={newManpower.activity_id || ''}
-                                            onChange={(e) => setNewManpower({ ...newManpower, activity_id: e.target.value || null })}
-                                            className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500 transition-all"
-                                        >
-                                            <option value="">Velg aktivitet...</option>
-                                            {activities.map(activity => (
-                                                <option key={activity.id} value={activity.id}>
-                                                    {activity.name}{activity.change_order_number ? ` (${activity.change_order_number})` : ''}
-                                                </option>
-                                            ))}
-                                        </select>
-                                        {newManpower.activity_id && activities.find(a => a.id === newManpower.activity_id)?.change_order_number && (
-                                            <div className="mt-2 text-sm text-blue-700 bg-blue-50 p-2 rounded-lg border border-blue-100">
-                                                <span className="font-bold">Endringsmelding:</span> {activities.find(a => a.id === newManpower.activity_id)?.change_order_number}
+                                    
+                                    {showQuickAddActivity && (
+                                        <div className="bg-primary-50 p-4 rounded-xl border border-primary-200 space-y-3">
+                                            <input
+                                                type="text"
+                                                value={newActivityName}
+                                                onChange={(e) => setNewActivityName(e.target.value)}
+                                                className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-primary-500/50"
+                                                placeholder="Navn på aktivitet *"
+                                            />
+                                            <input
+                                                type="text"
+                                                value={newActivityDesc}
+                                                onChange={(e) => setNewActivityDesc(e.target.value)}
+                                                className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-primary-500/50"
+                                                placeholder="Beskrivelse (valgfritt)"
+                                            />
+                                            <input
+                                                type="text"
+                                                value={newActivityChangeOrder}
+                                                onChange={(e) => setNewActivityChangeOrder(e.target.value)}
+                                                className="w-full bg-white border border-blue-200 rounded-lg px-3 py-2 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+                                                placeholder="Endringsmelding nummer (f.eks. EM-001)"
+                                            />
+                                            <div className="flex gap-2">
+                                                <button
+                                                    type="button"
+                                                    onClick={handleAddActivity}
+                                                    disabled={!newActivityName.trim()}
+                                                    className="flex-1 px-3 py-2 bg-primary-600 text-white text-sm font-bold rounded-lg hover:bg-primary-700 transition-colors disabled:opacity-50"
+                                                >
+                                                    Opprett aktivitet
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => {
+                                                        setShowQuickAddActivity(false);
+                                                        setNewActivityName('');
+                                                        setNewActivityDesc('');
+                                                        setNewActivityChangeOrder('');
+                                                    }}
+                                                    className="px-3 py-2 bg-slate-200 text-slate-700 text-sm font-bold rounded-lg hover:bg-slate-300 transition-colors"
+                                                >
+                                                    Avbryt
+                                                </button>
                                             </div>
-                                        )}
-                                    </>
-                                )}
-                            </div>
+                                        </div>
+                                    )}
 
-                            <div className="grid grid-cols-2 gap-4">
-                                <div>
-                                    <label className="block text-sm font-bold text-slate-700 mb-1">Kontraktsarbeidere</label>
-                                    <input
-                                        type="number"
-                                        required
-                                        min="0"
-                                        value={newManpower.contract_workers}
-                                        onChange={(e) => setNewManpower({ ...newManpower, contract_workers: e.target.value === '' ? '' : Number(e.target.value) })}
-                                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500 transition-all"
-                                        placeholder="0"
-                                    />
+                                    <div className="space-y-3">
+                                        {newManpower.billable_activities.map((act, index) => (
+                                            <div key={index} className="flex gap-2 items-start bg-slate-50 p-2 rounded-xl border border-slate-200 relative">
+                                                <div className="flex-1">
+                                                    <select
+                                                        value={act.activity_id}
+                                                        onChange={(e) => {
+                                                            const newActivities = [...newManpower.billable_activities];
+                                                            newActivities[index].activity_id = e.target.value;
+                                                            setNewManpower({ ...newManpower, billable_activities: newActivities });
+                                                        }}
+                                                        className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2.5 font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500 transition-all text-sm sm:text-base"
+                                                    >
+                                                        <option value="">Velg aktivitet...</option>
+                                                        {activities.map(activity => (
+                                                            <option key={activity.id} value={activity.id}>
+                                                                {activity.name}{activity.change_order_number ? ` (${activity.change_order_number})` : ''}
+                                                            </option>
+                                                        ))}
+                                                    </select>
+                                                </div>
+                                                <div className="w-24">
+                                                    <div className="relative">
+                                                        <input
+                                                            type="number"
+                                                            min="0"
+                                                            step="0.5"
+                                                            value={act.hours}
+                                                            onChange={(e) => {
+                                                                const newActivities = [...newManpower.billable_activities];
+                                                                newActivities[index].hours = e.target.value === '' ? '' : Number(e.target.value);
+                                                                setNewManpower({ ...newManpower, billable_activities: newActivities });
+                                                            }}
+                                                            className="w-full bg-white border border-amber-300 rounded-lg px-2 py-2.5 font-extrabold text-amber-900 focus:outline-none focus:ring-2 focus:ring-amber-500/50 pr-6 text-center text-sm sm:text-base"
+                                                            placeholder="0"
+                                                        />
+                                                        <span className="absolute right-2 top-1/2 -translate-y-1/2 text-amber-500 font-bold text-sm pointer-events-none">t</span>
+                                                    </div>
+                                                </div>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => {
+                                                        const newActivities = newManpower.billable_activities.filter((_, i) => i !== index);
+                                                        setNewManpower({ ...newManpower, billable_activities: newActivities });
+                                                    }}
+                                                    className="p-2.5 text-slate-400 hover:text-red-500 bg-white border border-slate-200 rounded-lg ml-1"
+                                                >
+                                                    <Trash2 className="w-5 h-5" />
+                                                </button>
+                                            </div>
+                                        ))}
+                                        
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                const totalHoursSoFar = newManpower.billable_activities.reduce((sum, a) => sum + (Number(a.hours) || 0), 0);
+                                                const defaultHours = getDefaultHours(newManpower.date, Number(newManpower.billable_workers) || 0);
+                                                const remainingHours = Math.max(0, defaultHours - totalHoursSoFar);
+                                                setNewManpower({ 
+                                                    ...newManpower, 
+                                                    billable_activities: [...newManpower.billable_activities, { activity_id: '', hours: remainingHours || '' }] 
+                                                });
+                                            }}
+                                            className="w-full py-3 border-2 border-dashed border-slate-300 rounded-xl text-slate-500 font-bold hover:bg-slate-50 hover:text-primary-600 hover:border-primary-300 transition-colors flex items-center justify-center text-sm bg-white"
+                                        >
+                                            <Plus className="w-4 h-4 mr-2" />
+                                            Legg til ny regningsaktivitet
+                                        </button>
+                                        <p className="text-xs text-slate-500 mt-2 text-center uppercase tracking-widest font-bold">
+                                            Forventet: {getDefaultHours(newManpower.date, Number(newManpower.billable_workers) || 0)}t | Totalt utfylt: {newManpower.billable_activities.reduce((sum, act) => sum + (Number(act.hours) || 0), 0)}t
+                                        </p>
+                                    </div>
                                 </div>
-                                <div>
-                                    <label className="block text-sm font-bold text-slate-700 mb-1">Regningsarbeidere</label>
-                                    <input
-                                        type="number"
-                                        required
-                                        min="0"
-                                        value={newManpower.billable_workers}
-                                        onChange={(e) => {
-                                            const workers = e.target.value === '' ? '' : Number(e.target.value);
-                                            const defaultHours = workers ? getDefaultHours(newManpower.date, Number(workers)) : 0;
-                                            setNewManpower({ ...newManpower, billable_workers: workers, hours_billable: defaultHours });
-                                        }}
-                                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-amber-500/50 focus:border-amber-500 transition-all"
-                                        placeholder="0"
-                                    />
+                            )}
+
+                            <div className="space-y-4">
+                                <div className="bg-slate-50 border border-slate-200 rounded-3xl p-4 md:p-5">
+                                    <label className="block text-sm font-bold text-slate-500 uppercase tracking-widest mb-4 text-center">Kontraktsarbeidere</label>
+                                    <div className="flex items-center justify-between gap-4">
+                                        <button 
+                                            type="button" 
+                                            onClick={() => setNewManpower({ ...newManpower, contract_workers: Math.max(0, (Number(newManpower.contract_workers) || 0) - 1) })}
+                                            className="w-16 h-16 shrink-0 bg-white border border-slate-200/80 rounded-2xl flex items-center justify-center text-slate-500 hover:bg-slate-100 hover:text-slate-800 hover:border-slate-300 active:scale-95 transition-all shadow-sm"
+                                        >
+                                            <Minus className="w-8 h-8" />
+                                        </button>
+                                        <input
+                                            type="number"
+                                            required
+                                            min="0"
+                                            value={newManpower.contract_workers}
+                                            onChange={(e) => setNewManpower({ ...newManpower, contract_workers: e.target.value === '' ? '' : Number(e.target.value) })}
+                                            className="w-full bg-white border border-slate-200/80 rounded-2xl px-2 py-4 text-3xl font-black text-slate-900 text-center focus:outline-none focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500 shadow-inner"
+                                            placeholder="0"
+                                        />
+                                        <button 
+                                            type="button" 
+                                            onClick={() => setNewManpower({ ...newManpower, contract_workers: (Number(newManpower.contract_workers) || 0) + 1 })}
+                                            className="w-16 h-16 shrink-0 bg-white border border-slate-200/80 rounded-2xl flex items-center justify-center text-primary-500 hover:bg-primary-50 hover:text-primary-700 hover:border-primary-200 active:scale-95 transition-all shadow-sm"
+                                        >
+                                            <Plus className="w-8 h-8" />
+                                        </button>
+                                    </div>
+                                </div>
+                                
+                                <div className="bg-amber-50/50 border border-amber-200/60 rounded-3xl p-4 md:p-5">
+                                    <label className="block text-sm font-bold text-amber-700/70 uppercase tracking-widest mb-4 text-center">Regningsarbeidere</label>
+                                    <div className="flex items-center justify-between gap-4">
+                                        <button 
+                                            type="button" 
+                                            onClick={() => {
+                                                const workers = Math.max(0, (Number(newManpower.billable_workers) || 0) - 1);
+                                                setNewManpower({ ...newManpower, billable_workers: workers });
+                                            }}
+                                            className="w-16 h-16 shrink-0 bg-white border border-amber-200/80 rounded-2xl flex items-center justify-center text-amber-600 hover:bg-amber-100 hover:text-amber-800 hover:border-amber-300 active:scale-95 transition-all shadow-sm"
+                                        >
+                                            <Minus className="w-8 h-8" />
+                                        </button>
+                                        <input
+                                            type="number"
+                                            required
+                                            min="0"
+                                            value={newManpower.billable_workers}
+                                            onChange={(e) => {
+                                                const workers = e.target.value === '' ? '' : Number(e.target.value);
+                                                setNewManpower({ ...newManpower, billable_workers: workers });
+                                            }}
+                                            className="w-full bg-white border border-amber-200/80 rounded-2xl px-2 py-4 text-3xl font-black text-amber-900 text-center focus:outline-none focus:ring-2 focus:ring-amber-500/50 focus:border-amber-500 shadow-inner"
+                                            placeholder="0"
+                                        />
+                                        <button 
+                                            type="button" 
+                                            onClick={() => {
+                                                const workers = (Number(newManpower.billable_workers) || 0) + 1;
+                                                setNewManpower({ ...newManpower, billable_workers: workers });
+                                            }}
+                                            className="w-16 h-16 shrink-0 bg-white border border-amber-200/80 rounded-2xl flex items-center justify-center text-amber-600 hover:bg-amber-50 hover:text-amber-800 hover:border-amber-300 active:scale-95 transition-all shadow-sm"
+                                        >
+                                            <Plus className="w-8 h-8" />
+                                        </button>
+                                    </div>
                                 </div>
                             </div>
 
@@ -817,24 +927,7 @@ export default function Bemanning() {
                             )}
 
                             {/* Hours Section */}
-                             <div>
-                                 <label className="block text-sm font-bold text-slate-700 mb-1">Regningstimer</label>
-                                 <input
-                                     type="number"
-                                     min="0"
-                                     step="0.5"
-                                     value={newManpower.hours_billable}
-                                     onChange={(e) => setNewManpower({ ...newManpower, hours_billable: e.target.value === '' ? '' : Number(e.target.value) })}
-                                     className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-amber-500/50 focus:border-amber-500 transition-all"
-                                     placeholder="0"
-                                 />
-                                 {Number(newManpower.billable_workers) > 0 && (
-                                     <p className="text-xs text-slate-500 mt-1">
-                                         Standard: {getDefaultHours(newManpower.date, Number(newManpower.billable_workers) || 0)}t 
-                                         ({new Date(newManpower.date).getDay() === 5 ? 'Fredag: 5.5t per arbeider' : 'Mandag-Torsdag: 8t per arbeider'})
-                                     </p>
-                                 )}
-                             </div>
+
 
                             <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-4">
                                 <div className="flex items-center justify-between pb-2 border-b border-slate-200/60">
@@ -843,24 +936,24 @@ export default function Bemanning() {
                                 </div>
                                 <div className="flex items-center justify-between pb-2 border-b border-slate-200/60">
                                     <span className="text-sm font-bold text-slate-700">Regningstimer:</span>
-                                    <span className="text-xl font-extrabold text-amber-600">{Number(newManpower.hours_billable) || 0}</span>
+                                    <span className="text-xl font-extrabold text-amber-600">{newManpower.billable_activities.reduce((sum, act) => sum + (Number(act.hours) || 0), 0)}</span>
                                 </div>
 
                                 {Number(newManpower.billable_workers) > 0 && (
                                     <div className="animate-in fade-in slide-in-from-top-2 duration-300 pt-2">
                                         <label className="block text-sm font-bold text-slate-700 mb-1">
-                                            Kommentar for regningsarbeid {!newManpower.activity_id && <span className="text-red-500">*</span>}
+                                            Kommentar for regningsarbeid {newManpower.billable_activities.length === 0 && <span className="text-red-500">*</span>}
                                         </label>
                                         <textarea
                                             rows={2}
-                                            required={Number(newManpower.billable_workers) > 0 && !newManpower.activity_id}
+                                            required={Number(newManpower.billable_workers) > 0 && newManpower.billable_activities.length === 0}
                                             value={newManpower.billable_comment}
                                             onChange={(e) => setNewManpower({ ...newManpower, billable_comment: e.target.value })}
                                             className="w-full bg-white border border-amber-300 rounded-xl px-4 py-2.5 font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-amber-500/50 focus:border-amber-500 transition-all placeholder:text-slate-400"
-                                            placeholder={newManpower.activity_id ? "Valgfri kommentar (aktivitet er valgt)" : "Gjelder regningsarbeid for... (Kreves når arbeidere er registrert på regning uten aktivitet)"}
+                                            placeholder={newManpower.billable_activities.length > 0 ? "Valgfri kommentar (aktiviteter er valgt)" : "Gjelder regningsarbeid for... (Kreves når arbeidere er registrert på regning uten aktivitet)"}
                                         />
-                                        {newManpower.activity_id && (
-                                            <p className="text-xs text-slate-500 mt-1">Kommentar er valgfri når aktivitet er valgt.</p>
+                                        {newManpower.billable_activities.length > 0 && (
+                                            <p className="text-xs text-slate-500 mt-1">Kommentar er valgfri når aktiviteter er valgt.</p>
                                         )}
                                     </div>
                                 )}

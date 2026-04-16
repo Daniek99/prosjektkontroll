@@ -1,0 +1,4 @@
+src/pages/Bemanning.tsx(69,15): error TS6133: 'dayOfWeek' is declared but its value is never read.
+src/pages/Bemanning.tsx(682,47): error TS6133: 'defaultHours' is declared but its value is never read.
+src/pages/Bemanning.tsx(866,55): error TS6133: 'defaultHours' is declared but its value is never read.
+src/pages/Bemanning.tsx(889,55): error TS6133: 'defaultHours' is declared but its value is never read.

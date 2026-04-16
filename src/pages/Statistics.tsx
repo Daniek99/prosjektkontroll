@@ -19,6 +19,7 @@ export default function Statistics() {
     const [activities, setActivities] = useState<any[]>([]);
     const [changeOrders, setChangeOrders] = useState<any[]>([]);
     const [rfis, setRfis] = useState<any[]>([]);
+    const [progressPercent, setProgressPercent] = useState<number>(0);
 
     useEffect(() => {
         if (!selectedSubcontractorId) return;
@@ -69,6 +70,32 @@ export default function Statistics() {
                 .gte('date_submitted', startDateStr)
                 .lte('date_submitted', todayStr);
 
+            // Fetch Grid Data for Progress %
+            const { data: gridRes } = await supabase
+                .from('project_progress_grid')
+                .select('grid_data')
+                .eq('subcontractor_id', selectedSubcontractorId)
+                .maybeSingle();
+                
+            let percentage = 0;
+            if (gridRes && gridRes.grid_data) {
+                const gData = gridRes.grid_data as any;
+                const plans = gData.plans || [];
+                const activePlan = plans.find((p: any) => p.id === gData.activePlanId) || plans[0];
+                const cells = activePlan?.grid?.cells || {};
+                const totalCells = Object.keys(cells).length;
+                if (totalCells > 0) {
+                    let completed = 0;
+                    let inProgress = 0;
+                    Object.values(cells).forEach((c: any) => {
+                        if (c?.status === 'completed') completed++;
+                        else if (c?.status === 'in_progress') inProgress++;
+                    });
+                    percentage = (completed + (inProgress * 0.5)) / totalCells;
+                }
+            }
+            setProgressPercent(percentage);
+
             setManpower(manpowerData || []);
             setActivities(actData || []);
             setChangeOrders(coData || []);
@@ -81,7 +108,7 @@ export default function Statistics() {
     }, [selectedSubcontractorId, period]);
 
     // Derived Statistics
-    const { totalBillable, totalContract, totalBillableHours, totalApprovedAmount, openRfis, closedRfis, manpowerChartData, activityHoursData } = useMemo(() => {
+    const { totalBillable, totalContract, totalBillableHours, totalApprovedAmount, openRfis, closedRfis, eacHours, manpowerChartData, activityHoursData } = useMemo(() => {
         let totalBillable = 0;
         let totalContract = 0;
         let totalBillableHours = 0;
@@ -149,10 +176,11 @@ export default function Statistics() {
             totalApprovedAmount,
             openRfis,
             closedRfis,
+            eacHours: progressPercent > 0 ? Math.round(totalBillableHours / progressPercent) : 0,
             manpowerChartData: Array.from(chartDataMap.values()),
             activityHoursData: Array.from(activityHoursMap.values())
         };
-    }, [manpower, changeOrders, rfis, activities]);
+    }, [manpower, changeOrders, rfis, activities, progressPercent]);
 
     const formatCurrency = (amount: number) => {
         return new Intl.NumberFormat('no-NO', { style: 'currency', currency: 'NOK', maximumFractionDigits: 0 }).format(amount);
@@ -206,7 +234,7 @@ export default function Statistics() {
             ) : (
                 <>
                     {/* KPI Cards */}
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                    <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-4">
                         <div className="bg-white rounded-3xl p-6 border border-slate-200/60 shadow-sm relative overflow-hidden group">
                             <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:opacity-10 transition-opacity">
                                 <Users className="w-24 h-24" />
@@ -215,7 +243,7 @@ export default function Statistics() {
                                 <div className="p-2 bg-amber-50 rounded-lg">
                                     <Clock className="w-5 h-5" />
                                 </div>
-                                <h3 className="font-bold text-slate-600">Regningstimer</h3>
+                                <h3 className="font-bold text-slate-600 truncate">Regningstimer</h3>
                             </div>
                             <p className="text-3xl font-black text-slate-900 mt-4">{totalBillableHours} <span className="text-base font-bold text-slate-400">timer</span></p>
                         </div>
@@ -228,9 +256,24 @@ export default function Statistics() {
                                 <div className="p-2 bg-primary-50 rounded-lg">
                                     <Users className="w-5 h-5" />
                                 </div>
-                                <h3 className="font-bold text-slate-600">Regningsarbeidere</h3>
+                                <h3 className="font-bold text-slate-600 truncate">Arbeidere</h3>
                             </div>
-                            <p className="text-3xl font-black text-slate-900 mt-4">{totalBillable} <span className="text-base font-bold text-slate-400">personer</span></p>
+                            <p className="text-3xl font-black text-slate-900 mt-4">{totalBillable} <span className="text-base font-bold text-slate-400">pers.</span></p>
+                        </div>
+
+                        <div className="bg-slate-900 rounded-3xl p-6 border border-slate-700 shadow-sm relative overflow-hidden group">
+                            <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:opacity-10 transition-opacity">
+                                <TrendingUp className="w-24 h-24 text-white" />
+                            </div>
+                            <div className="flex items-center gap-3 text-emerald-400 mb-2">
+                                <div className="p-2 bg-slate-800 border border-slate-700 rounded-lg">
+                                    <TrendingUp className="w-5 h-5" />
+                                </div>
+                                <h3 className="font-bold text-slate-400 truncate">EAC (Prognose)</h3>
+                            </div>
+                            <p className="text-3xl font-black text-emerald-400 mt-4">
+                                {eacHours > 0 ? eacHours : '-'} <span className="text-base font-bold text-slate-500">timer totalt</span>
+                            </p>
                         </div>
 
                         <div className="bg-white rounded-3xl p-6 border border-slate-200/60 shadow-sm relative overflow-hidden group">
@@ -241,18 +284,18 @@ export default function Statistics() {
                                 <div className="p-2 bg-emerald-50 rounded-lg">
                                     <DollarSign className="w-5 h-5" />
                                 </div>
-                                <h3 className="font-bold text-slate-600">Godkjent Beløp (Endring)</h3>
+                                <h3 className="font-bold text-slate-600 truncate">Endringer</h3>
                             </div>
-                            <p className="text-3xl font-black text-slate-900 mt-4">{formatCurrency(totalApprovedAmount)}</p>
+                            <p className="text-3xl font-black text-slate-900 mt-4">{formatCurrency(totalApprovedAmount).replace('kr', '')}</p>
                         </div>
 
                         <div className="bg-white rounded-3xl p-6 border border-slate-200/60 shadow-sm relative overflow-hidden flex divide-x divide-slate-100">
                             <div className="flex-1 pr-4">
-                                <div className="flex items-center gap-2 text-rose-500 mb-2"><AlertCircle className="w-4 h-4" /> <span className="font-bold text-xs">Åpne RFI</span></div>
+                                <div className="flex items-center gap-2 text-rose-500 mb-2"><AlertCircle className="w-4 h-4" /> <span className="font-bold text-[11px] uppercase tracking-wider">Åpne RFI</span></div>
                                 <p className="text-2xl font-black text-slate-900">{openRfis}</p>
                             </div>
                             <div className="flex-1 pl-4">
-                                <div className="flex items-center gap-2 text-emerald-500 mb-2"><CheckCircle2 className="w-4 h-4" /> <span className="font-bold text-xs">Lukkede</span></div>
+                                <div className="flex items-center gap-2 text-emerald-500 mb-2"><CheckCircle2 className="w-4 h-4" /> <span className="font-bold text-[11px] uppercase tracking-wider">Lukket</span></div>
                                 <p className="text-2xl font-black text-slate-900">{closedRfis}</p>
                             </div>
                         </div>

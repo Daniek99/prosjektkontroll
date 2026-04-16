@@ -12,10 +12,12 @@ import {
     Building2,
     Map,
     Contact,
-    BarChart3
+    BarChart3,
+    Flag
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import SubcontractorSelector from './SubcontractorSelector';
+import GlobalSearch from './GlobalSearch';
 import { cn } from '../lib/utils';
 
 const navItems = [
@@ -29,6 +31,7 @@ const navItems = [
     { name: 'Bemanning', icon: ClipboardList, path: '/bemanning' },
     { name: 'Områder', icon: Map, path: '/areas' },
     { name: 'Dagbok', icon: BookOpen, path: '/diary' },
+    { name: 'Beslutninger', icon: Flag, path: '/decisions' },
     { name: 'Kontakter', icon: Contact, path: '/contacts' },
     { name: 'Statistikk', icon: BarChart3, path: '/statistics' },
 ];
@@ -102,7 +105,8 @@ export default function Layout() {
                         <span className="text-lg font-bold tracking-tight">Prosjektkontroll</span>
                     </div>
 
-                    <div className="flex-1 flex justify-end md:justify-between items-center">
+                    <div className="flex-1 flex justify-end md:justify-between items-center ml-4">
+                        <GlobalSearch />
                         <div className="hidden md:flex items-center space-x-2 text-sm font-medium text-white/90">
                             <SubcontractorSelector />
                         </div>
