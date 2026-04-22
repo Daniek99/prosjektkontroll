@@ -65,11 +65,19 @@ CREATE TABLE change_orders (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 7. Create Work Activities Table
+-- 7. Create Work Activities Table (Merged with Progress Tasks)
 CREATE TABLE work_activities (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   name TEXT NOT NULL,
   description TEXT,
+  subcontractor_id UUID REFERENCES subcontractors(id) ON DELETE CASCADE,
+  change_order_number TEXT,
+  start_date DATE,
+  end_date DATE,
+  deadline DATE,
+  expected_end_date DATE,
+  status TEXT DEFAULT 'planned',
+  document_url TEXT,
   is_active BOOLEAN DEFAULT true,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
@@ -214,3 +222,16 @@ CREATE POLICY "Allow authenticated full access to subcontractor_areas" ON subcon
 -- CREATE TABLE IF NOT EXISTS decision_logs ( id UUID PRIMARY KEY DEFAULT uuid_generate_v4(), subcontractor_id UUID REFERENCES subcontractors(id) ON DELETE SET NULL, area_id UUID REFERENCES global_areas(id) ON DELETE SET NULL, subject TEXT NOT NULL, content TEXT, date DATE NOT NULL DEFAULT CURRENT_DATE, created_by UUID REFERENCES auth.users(id), created_at TIMESTAMPTZ DEFAULT NOW(), updated_at TIMESTAMPTZ DEFAULT NOW() );
 -- ALTER TABLE decision_logs ENABLE ROW LEVEL SECURITY;
 -- CREATE POLICY "Allow authenticated full access to decision_logs" ON decision_logs FOR ALL TO authenticated USING (true) WITH CHECK (true);
+
+-- Phase 12 Migrations: Engineering Files (Prosjektering)
+-- CREATE TABLE IF NOT EXISTS engineering_files ( id UUID PRIMARY KEY DEFAULT uuid_generate_v4(), subcontractor_id UUID REFERENCES subcontractors(id) ON DELETE CASCADE, area_id UUID REFERENCES global_areas(id) ON DELETE SET NULL, file_url TEXT NOT NULL, file_name TEXT NOT NULL, uploaded_by UUID REFERENCES auth.users(id), created_at TIMESTAMPTZ DEFAULT NOW(), updated_at TIMESTAMPTZ DEFAULT NOW() );
+-- ALTER TABLE engineering_files ENABLE ROW LEVEL SECURITY;
+-- CREATE POLICY "Allow authenticated full access to engineering_files" ON engineering_files FOR ALL TO authenticated USING (true) WITH CHECK (true);
+-- INSERT INTO storage.buckets (id, name, public) VALUES ('engineering', 'engineering', true) ON CONFLICT (id) DO NOTHING;
+
+-- Phase 13 Migrations: Folders and Extended Progress Tasks
+-- CREATE TABLE IF NOT EXISTS engineering_folders ( id UUID PRIMARY KEY DEFAULT uuid_generate_v4(), name TEXT NOT NULL, subcontractor_id UUID REFERENCES subcontractors(id) ON DELETE CASCADE, created_at TIMESTAMPTZ DEFAULT NOW() );
+-- ALTER TABLE engineering_folders ENABLE ROW LEVEL SECURITY;
+-- CREATE POLICY "Allow authenticated full access to engineering_folders" ON engineering_folders FOR ALL TO authenticated USING (true) WITH CHECK (true);
+-- ALTER TABLE engineering_files ADD COLUMN IF NOT EXISTS folder_id UUID REFERENCES engineering_folders(id) ON DELETE SET NULL;
+-- Note: progress_tasks was removed and merged into work_activities.

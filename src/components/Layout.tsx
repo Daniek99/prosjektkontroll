@@ -14,7 +14,7 @@ import {
     Map,
     Contact,
     BarChart3,
-    Flag
+    PenTool
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import SubcontractorSelector from './SubcontractorSelector';
@@ -32,7 +32,7 @@ const navItems = [
     { name: 'Bemanning', icon: ClipboardList, path: '/bemanning' },
     { name: 'Områder', icon: Map, path: '/areas' },
     { name: 'Dagbok', icon: BookOpen, path: '/diary' },
-    { name: 'Beslutninger', icon: Flag, path: '/decisions' },
+    { name: 'Prosjektering', icon: PenTool, path: '/decisions' },
     { name: 'Kontakter', icon: Contact, path: '/contacts' },
     { name: 'Statistikk', icon: BarChart3, path: '/statistics' },
 ];

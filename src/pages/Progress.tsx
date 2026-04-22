@@ -42,6 +42,16 @@ interface ProgressPlan {
     grid: GridData;
 }
 
+interface ProgressTask {
+    id: string;
+    name: string;
+    subcontractor_id: string;
+    start_date: string | null;
+    deadline: string | null;
+    expected_end_date: string | null;
+    status: string;
+}
+
 interface PlansData {
     activePlanId: string;
     plans: ProgressPlan[];
@@ -137,6 +147,9 @@ export default function Progress() {
     const [isDragging, setIsDragging] = useState(false);
     const [showHidden, setShowHidden] = useState(false);
     const [projectPlans, setProjectPlans] = useState<{ id: string, name: string, file_url: string }[]>([]);
+    const [progressTasks, setProgressTasks] = useState<ProgressTask[]>([]);
+    const [showTaskModal, setShowTaskModal] = useState(false);
+    const [currentTask, setCurrentTask] = useState<Partial<ProgressTask>>({});
     const [showUploadPlanModal, setShowUploadPlanModal] = useState(false);
     const [showViewPlansModal, setShowViewPlansModal] = useState(false);
     const [uploadPlanName, setUploadPlanName] = useState('');
@@ -260,6 +273,14 @@ export default function Progress() {
                 .select('grid_data')
                 .eq('subcontractor_id', selectedSubcontractorId)
                 .maybeSingle();
+
+            const { data: tasksRes } = await supabase
+                .from('work_activities')
+                .select('*')
+                .eq('subcontractor_id', selectedSubcontractorId)
+                .order('start_date', { ascending: true });
+
+            if (tasksRes) setProgressTasks(tasksRes);
 
             if (photoData) setPhotos(photoData);
             if (areaData) setAreas(areaData);
@@ -446,6 +467,41 @@ export default function Progress() {
             console.error('Error deleting plan:', error);
             alert('Kunne ikke slette plan.');
         }
+    };
+
+    const handleSaveTask = async (e: React.FormEvent) => {
+        e.preventDefault();
+        setLoading(true);
+        const payload = {
+            subcontractor_id: selectedSubcontractorId,
+            name: currentTask.name,
+            start_date: currentTask.start_date || null,
+            deadline: currentTask.deadline || null,
+            expected_end_date: currentTask.expected_end_date || null,
+            status: currentTask.status || 'planned'
+        };
+
+        let res;
+        if (currentTask.id) {
+            res = await supabase.from('work_activities').update(payload).eq('id', currentTask.id).select();
+        } else {
+            res = await supabase.from('work_activities').insert([payload]).select();
+        }
+
+        if (!res.error && res.data) {
+            if (currentTask.id) setProgressTasks(progressTasks.map(t => t.id === currentTask.id ? res.data[0] : t));
+            else setProgressTasks([...progressTasks, res.data[0]]);
+            setShowTaskModal(false);
+        } else {
+            alert('Kunne ikke lagre aktivitet: ' + res.error?.message);
+        }
+        setLoading(false);
+    };
+
+    const handleDeleteTask = async (id: string) => {
+        if (!confirm('Vil du slette aktiviteten?')) return;
+        await supabase.from('work_activities').delete().eq('id', id);
+        setProgressTasks(progressTasks.filter(t => t.id !== id));
     };
 
     const handleCellPointerDown = (e: React.PointerEvent, rIdx: number, cIdx: number) => {
@@ -1131,6 +1187,60 @@ export default function Progress() {
                 </div>
             </div>
 
+            {/* Activity Register Section */}
+            <div className="bg-white border border-slate-200 rounded-3xl p-6 sm:p-8 mt-8 shadow-sm">
+                <div className="flex justify-between items-center mb-6">
+                    <div>
+                        <h2 className="text-xl font-extrabold text-slate-800 flex items-center">
+                            <CalendarIcon className="w-5 h-5 mr-3 text-primary-500" />
+                            Aktivitetsregister
+                        </h2>
+                        <p className="text-slate-500 text-sm mt-1.5 font-medium">Spor datoer for oppstart, forventet ferdig og frister.</p>
+                    </div>
+                    <button onClick={() => { setCurrentTask({}); setShowTaskModal(true); }} className="bg-primary-600 text-white px-4 py-2.5 rounded-xl font-bold text-sm shadow flex items-center hover:bg-primary-700 transition">
+                        <Plus className="w-4 h-4 mr-2" />
+                        Ny Aktivitet
+                    </button>
+                </div>
+                {progressTasks.length === 0 ? (
+                    <div className="text-center py-8 bg-slate-50 rounded-2xl border border-dashed border-slate-300">
+                        <p className="text-slate-500 font-medium">Ingen aktiviteter opprettet enda.</p>
+                    </div>
+                ) : (
+                    <div className="overflow-x-auto border border-slate-200 rounded-2xl bg-white shadow-sm">
+                        <table className="w-full text-left text-sm whitespace-nowrap">
+                            <thead className="bg-slate-50/80 text-slate-500 uppercase tracking-wider font-extrabold text-xs border-b border-slate-200">
+                                <tr>
+                                    <th className="p-4">Aktivitet / Beskrivelse</th>
+                                    <th className="p-4">Oppstart</th>
+                                    <th className="p-4 text-primary-700 bg-primary-50/50">Forventet ferdig</th>
+                                    <th className="p-4 text-red-600 bg-red-50/50">Frist (Deadline)</th>
+                                    <th className="p-4">Status</th>
+                                    <th className="p-4">Handlinger</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100">
+                                {progressTasks.map(task => (
+                                    <tr key={task.id} className="hover:bg-slate-50 transition-colors">
+                                        <td className="p-4 font-bold text-slate-800 border-r border-slate-100">{task.name}</td>
+                                        <td className="p-4 font-semibold text-slate-600 border-r border-slate-100">{task.start_date ? new Date(task.start_date).toLocaleDateString('no-NO') : '-'}</td>
+                                        <td className="p-4 font-bold text-primary-700 bg-primary-50/20 border-r border-slate-100">{task.expected_end_date ? new Date(task.expected_end_date).toLocaleDateString('no-NO') : '-'}</td>
+                                        <td className="p-4 font-bold text-red-600 bg-red-50/20 border-r border-slate-100">{task.deadline ? new Date(task.deadline).toLocaleDateString('no-NO') : '-'}</td>
+                                        <td className="p-4">
+                                            <span className={`px-2 py-1 rounded-md text-[10px] font-bold uppercase border ${task.status === 'completed' ? 'bg-green-50 text-green-700 border-green-200' : task.status === 'in_progress' ? 'bg-yellow-50 text-yellow-700 border-yellow-200' : 'bg-slate-50 text-slate-600 border-slate-200'}`}>{task.status === 'completed' ? 'Ferdig' : task.status === 'in_progress' ? 'Påbegynt' : 'Planlagt'}</span>
+                                        </td>
+                                        <td className="p-4 flex gap-2">
+                                            <button onClick={() => { setCurrentTask(task); setShowTaskModal(true); }} className="p-2 text-slate-400 hover:text-primary-600 hover:bg-primary-50 border border-transparent hover:border-primary-100 rounded-lg transition-all"><Edit2 className="w-4 h-4" /></button>
+                                            <button onClick={() => handleDeleteTask(task.id)} className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 border border-transparent hover:border-red-100 rounded-lg transition-all"><Trash2 className="w-4 h-4" /></button>
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                )}
+            </div>
+
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-transparent mt-8">
                 <h2 className="text-xl font-extrabold text-slate-900 tracking-tight flex items-center">
                     <Camera className="w-5 h-5 mr-2 text-primary-500" />
@@ -1576,6 +1686,48 @@ export default function Progress() {
                             className="w-full h-full"
                             title={previewPlan.name}
                         />
+                    </div>
+                </div>
+            )}
+
+            {/* Task Form Modal */}
+            {showTaskModal && (
+                <div className="fixed inset-0 z-[80] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm">
+                    <div className="bg-white rounded-3xl w-full max-w-md shadow-2xl overflow-hidden border border-slate-200">
+                        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 bg-slate-50">
+                            <h3 className="text-lg font-extrabold text-slate-800">{currentTask.id ? 'Rediger Aktivitet' : 'Ny Aktivitet'}</h3>
+                            <button onClick={() => setShowTaskModal(false)} className="text-slate-400 hover:text-red-500 p-1 rounded-lg transition-colors"><X className="w-5 h-5" /></button>
+                        </div>
+                        <form onSubmit={handleSaveTask} className="p-6 space-y-4">
+                            <div>
+                                <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-1">Aktivitetsnavn</label>
+                                <input type="text" required value={currentTask.name || ''} onChange={e => setCurrentTask({...currentTask, name: e.target.value})} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 font-medium focus:ring-2 focus:ring-primary-500/50" />
+                            </div>
+                            <div>
+                                <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-1">Oppstartsdato</label>
+                                <input type="date" required value={currentTask.start_date || ''} onChange={e => setCurrentTask({...currentTask, start_date: e.target.value})} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 font-medium focus:ring-2 focus:ring-primary-500/50" />
+                            </div>
+                            <div>
+                                <label className="block text-xs font-bold text-primary-700 uppercase tracking-widest mb-1">Forventet ferdigdato</label>
+                                <input type="date" value={currentTask.expected_end_date || ''} onChange={e => setCurrentTask({...currentTask, expected_end_date: e.target.value})} className="w-full bg-primary-50/50 border border-primary-200 text-primary-900 rounded-xl px-4 py-2.5 font-medium focus:ring-2 focus:ring-primary-500/50" />
+                            </div>
+                            <div>
+                                <label className="block text-xs font-bold text-red-600 uppercase tracking-widest mb-1">Frist (Valgfri)</label>
+                                <input type="date" value={currentTask.deadline || ''} onChange={e => setCurrentTask({...currentTask, deadline: e.target.value})} className="w-full bg-red-50 text-red-900 border border-red-200 rounded-xl px-4 py-2.5 font-medium focus:ring-2 focus:ring-red-500/50" />
+                            </div>
+                            <div>
+                                <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-1">Status</label>
+                                <select value={currentTask.status || 'planned'} onChange={e => setCurrentTask({...currentTask, status: e.target.value})} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 font-medium focus:ring-2 focus:ring-primary-500/50">
+                                    <option value="planned">Planlagt</option>
+                                    <option value="in_progress">Påbegynt</option>
+                                    <option value="completed">Ferdig</option>
+                                </select>
+                            </div>
+                            <div className="pt-2 flex gap-3">
+                                <button type="button" onClick={() => setShowTaskModal(false)} className="flex-1 px-4 py-3 bg-white border border-slate-200 text-slate-700 font-bold rounded-xl hover:bg-slate-50 transition-colors">Avbryt</button>
+                                <button type="submit" disabled={loading} className="flex-1 px-4 py-3 bg-primary-600 text-white font-bold rounded-xl hover:bg-primary-700 disabled:opacity-50 transition-colors shadow-sm">Lagre</button>
+                            </div>
+                        </form>
                     </div>
                 </div>
             )}

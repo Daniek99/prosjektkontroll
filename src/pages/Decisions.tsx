@@ -1,7 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import { useSubcontractor } from '../contexts/SubcontractorContext';
-import { Flag, Plus, X, Search, Building2, Calendar, Mail, FileText } from 'lucide-react';
+import { PenTool, Plus, X, Search, Building2, Calendar, FileText, ChevronLeft, ChevronRight, Upload, File as FileIcon, Edit3, Folder, FolderPlus } from 'lucide-react';
 
 interface DecisionLog {
     id: string;
@@ -11,79 +11,74 @@ interface DecisionLog {
     content: string;
     date: string;
     created_at: string;
-    global_areas?: {
-        building: string;
-        floor: string;
-        zone: string;
-    } | null;
-    subcontractors?: {
-        company_name: string;
-    } | null;
+    global_areas?: { building: string; floor: string; zone: string; } | null;
+    subcontractors?: { company_name: string; } | null;
 }
 
-interface Area {
+interface EngineeringFolder {
     id: string;
-    building: string;
-    floor: string;
-    zone: string;
+    name: string;
+    subcontractor_id: string | null;
 }
 
-// Since we want this to be global, we don't strictly require a single selected subcontractor,
-// but we'll fetch logs accordingly. If a sub is selected, we could filter by them, 
-// but often standard emails apply to specific subs. We will fetch all logs for the current company!
+interface EngineeringFile {
+    id: string;
+    subcontractor_id: string | null;
+    area_id: string | null;
+    folder_id: string | null;
+    file_url: string;
+    file_name: string;
+    created_at: string;
+}
+
+interface Area { id: string; building: string; floor: string; zone: string; }
+
 export default function Decisions() {
     const { selectedSubcontractorId, subcontractors } = useSubcontractor();
     const [logs, setLogs] = useState<DecisionLog[]>([]);
+    const [files, setFiles] = useState<EngineeringFile[]>([]);
+    const [folders, setFolders] = useState<EngineeringFolder[]>([]);
     const [areas, setAreas] = useState<Area[]>([]);
     const [loading, setLoading] = useState(true);
+    const [uploading, setUploading] = useState(false);
     
     // UI state
-    const [showModal, setShowModal] = useState(false);
-    const [searchTerm, setSearchTerm] = useState('');
-    
-    // Form state
-    const [newLog, setNewLog] = useState<{
-        subject: string;
-        content: string;
-        date: string;
-        subcontractor_id: string;
-        area_id: string;
-    }>({
-        subject: '',
-        content: '',
-        date: new Date().toISOString().split('T')[0],
-        subcontractor_id: '',
-        area_id: ''
-    });
+    const [showLogModal, setShowLogModal] = useState(false);
+    const [editingLog, setEditingLog] = useState<DecisionLog | null>(null);
+    const [showFileModal, setShowFileModal] = useState(false);
+    const [showFolderModal, setShowFolderModal] = useState(false);
 
-    useEffect(() => {
-        fetchData();
-    }, [selectedSubcontractorId]);
+    const [searchTerm, setSearchTerm] = useState('');
+    const [filterAreaId, setFilterAreaId] = useState('');
+    const [expandedStacks, setExpandedStacks] = useState<Record<string, boolean>>({});
+    
+    const scrollContainerRef = useRef<HTMLDivElement>(null);
+    
+    const [logForm, setLogForm] = useState({ subject: '', content: '', date: new Date().toISOString().split('T')[0], subcontractor_id: '', area_id: '' });
+    const [folderForm, setFolderForm] = useState({ name: '', subcontractor_id: '' });
+    const [fileForm, setFileForm] = useState<{ subcontractor_id: string; folder_id: string; file: File | null; }>({ subcontractor_id: '', folder_id: '', file: null });
+
+    useEffect(() => { fetchData(); }, [selectedSubcontractorId]);
 
     const fetchData = async () => {
         setLoading(true);
-        // Fetch global areas for dropdown
         const { data: areasData } = await supabase.from('global_areas').select('*');
         if (areasData) setAreas(areasData);
 
-        // Fetch logs
-        let query = supabase
-            .from('decision_logs')
-            .select(`
-                *,
-                global_areas(building, floor, zone),
-                subcontractors(company_name)
-            `)
-            .order('date', { ascending: false });
+        let logQuery = supabase.from('decision_logs').select(`*, global_areas(building, floor, zone), subcontractors(company_name)`).order('date', { ascending: false });
+        let fileQuery = supabase.from('engineering_files').select('*').order('created_at', { ascending: false });
+        let folderQuery = supabase.from('engineering_folders').select('*').order('created_at', { ascending: true });
 
         if (selectedSubcontractorId) {
-            query = query.eq('subcontractor_id', selectedSubcontractorId);
+            logQuery = logQuery.eq('subcontractor_id', selectedSubcontractorId);
+            fileQuery = fileQuery.eq('subcontractor_id', selectedSubcontractorId);
+            folderQuery = folderQuery.eq('subcontractor_id', selectedSubcontractorId);
         }
 
-        const { data: logsData } = await query;
-        if (logsData) {
-            setLogs(logsData as unknown as DecisionLog[]);
-        }
+        const [logsRes, filesRes, foldersRes] = await Promise.all([logQuery, fileQuery, folderQuery]);
+        if (logsRes.data) setLogs(logsRes.data as unknown as DecisionLog[]);
+        if (filesRes.data) setFiles(filesRes.data as EngineeringFile[]);
+        if (foldersRes.data) setFolders(foldersRes.data as EngineeringFolder[]);
         
         setLoading(false);
     };
@@ -91,190 +86,447 @@ export default function Decisions() {
     const handleSaveLog = async (e: React.FormEvent) => {
         e.preventDefault();
         setLoading(true);
-
-        const payload = {
-            subject: newLog.subject,
-            content: newLog.content,
-            date: newLog.date,
-            subcontractor_id: newLog.subcontractor_id || null,
-            area_id: newLog.area_id || null
-        };
-
-        const { error } = await supabase.from('decision_logs').insert([payload]);
-
-        if (!error) {
-            fetchData();
-            setShowModal(false);
-            setNewLog({
-                subject: '',
-                content: '',
-                date: new Date().toISOString().split('T')[0],
-                subcontractor_id: '',
-                area_id: ''
-            });
+        const payload = { subject: logForm.subject, content: logForm.content, date: logForm.date, subcontractor_id: logForm.subcontractor_id || null, area_id: logForm.area_id || null };
+        if (editingLog) {
+            const { error } = await supabase.from('decision_logs').update(payload).eq('id', editingLog.id);
+            if (error) alert('Kunne ikke oppdatere logg: ' + error.message);
         } else {
-            alert('Kunne ikke lagre logg: ' + error.message);
+            const { error } = await supabase.from('decision_logs').insert([payload]);
+            if (error) alert('Kunne ikke lagre logg: ' + error.message);
+        }
+        fetchData();
+        setShowLogModal(false);
+        setEditingLog(null);
+        setLogForm({ subject: '', content: '', date: new Date().toISOString().split('T')[0], subcontractor_id: '', area_id: '' });
+        setLoading(false);
+    };
+
+    const handleCreateFolder = async (e: React.FormEvent) => {
+        e.preventDefault();
+        setLoading(true);
+        const { error } = await supabase.from('engineering_folders').insert([{ name: folderForm.name, subcontractor_id: folderForm.subcontractor_id || null }]);
+        if (error) alert('Kunne ikke opprette mappe: ' + error.message);
+        else {
+            fetchData();
+            setShowFolderModal(false);
+            setFolderForm({ name: '', subcontractor_id: '' });
         }
         setLoading(false);
     };
 
-    const filteredLogs = logs.filter(log => 
-        log.subject.toLowerCase().includes(searchTerm.toLowerCase()) || 
-        log.content?.toLowerCase().includes(searchTerm.toLowerCase())
-    );
+    const handleUploadFile = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!fileForm.file) return;
+        setUploading(true);
+        const fileExt = fileForm.file.name.split('.').pop();
+        const fileName = `${Math.random().toString(36).substring(2)}_${Date.now()}.${fileExt}`;
+        const { error: uploadError } = await supabase.storage.from('engineering').upload(fileName, fileForm.file);
+
+        if (uploadError) {
+            alert('Feil ved opplasting av fil: ' + uploadError.message);
+            setUploading(false);
+            return;
+        }
+
+        const { data: urlData } = supabase.storage.from('engineering').getPublicUrl(fileName);
+        const { error: dbError } = await supabase.from('engineering_files').insert([{
+            file_name: fileForm.file.name,
+            file_url: urlData.publicUrl,
+            subcontractor_id: fileForm.subcontractor_id || null,
+            folder_id: fileForm.folder_id || null
+        }]);
+
+        if (dbError) alert('Kunne ikke lagre filreferanse: ' + dbError.message);
+        else {
+            fetchData();
+            setShowFileModal(false);
+            setFileForm({ subcontractor_id: '', folder_id: '', file: null });
+        }
+        setUploading(false);
+    };
+
+    const openEditLog = (log: DecisionLog) => {
+        setEditingLog(log);
+        setLogForm({ subject: log.subject, content: log.content, date: log.date, subcontractor_id: log.subcontractor_id || '', area_id: log.area_id || '' });
+        setShowLogModal(true);
+    };
+
+    const scrollLeft = () => scrollContainerRef.current?.scrollBy({ left: -350, behavior: 'smooth' });
+    const scrollRight = () => scrollContainerRef.current?.scrollBy({ left: 350, behavior: 'smooth' });
+
+    const toggleStack = (subName: string, e: React.MouseEvent) => {
+        if ((e.target as HTMLElement).closest('button')) return;
+        setExpandedStacks(prev => ({ ...prev, [subName]: !prev[subName] }));
+    };
+
+    const filteredLogs = logs.filter(log => {
+        const matchesSearch = log.subject.toLowerCase().includes(searchTerm.toLowerCase()) || log.content?.toLowerCase().includes(searchTerm.toLowerCase());
+        const matchesArea = filterAreaId ? log.area_id === filterAreaId : true;
+        return matchesSearch && matchesArea;
+    });
+
+    const logsBySubcontractor = filteredLogs.reduce((acc, log) => {
+        const subName = log.subcontractors?.company_name || 'Generelt / Ukjent';
+        if (!acc[subName]) acc[subName] = { subId: log.subcontractor_id, logs: [], files: [], folders: [] };
+        acc[subName].logs.push(log);
+        return acc;
+    }, {} as Record<string, { subId: string | null, logs: DecisionLog[], files: EngineeringFile[], folders: EngineeringFolder[] }>);
+    
+    // Attach files and folders to proper groups
+    subcontractors.forEach(sub => {
+        if (!logsBySubcontractor[sub.company_name]) {
+            logsBySubcontractor[sub.company_name] = { subId: sub.id, logs: [], files: [], folders: [] };
+        }
+    });
+
+    files.forEach(file => {
+        const subMatch = subcontractors.find(s => s.id === file.subcontractor_id);
+        const subName = subMatch?.company_name || 'Generelt / Ukjent';
+        if (!logsBySubcontractor[subName]) logsBySubcontractor[subName] = { subId: file.subcontractor_id, logs: [], files: [], folders: [] };
+        logsBySubcontractor[subName].files.push(file);
+    });
+
+    folders.forEach(folder => {
+        const subMatch = subcontractors.find(s => s.id === folder.subcontractor_id);
+        const subName = subMatch?.company_name || 'Generelt / Ukjent';
+        if (!logsBySubcontractor[subName]) logsBySubcontractor[subName] = { subId: folder.subcontractor_id, logs: [], files: [], folders: [] };
+        logsBySubcontractor[subName].folders.push(folder);
+    });
+
+    const sortedSubcontractors = Object.keys(logsBySubcontractor).sort((a, b) => {
+        if (a === 'Generelt / Ukjent') return 1;
+        if (b === 'Generelt / Ukjent') return -1;
+        return a.localeCompare(b);
+    });
 
     return (
-        <div className="space-y-6 max-w-7xl mx-auto">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-6 rounded-3xl shadow-sm border border-slate-200/60">
+        <div className="space-y-6 flex flex-col h-[calc(100vh-8rem)] max-w-[1700px] mx-auto p-4 sm:p-6">
+            <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-4 bg-white p-6 rounded-3xl shadow-sm border border-slate-200/60 shrink-0">
                 <div>
                     <h1 className="text-2xl font-extrabold text-slate-900 tracking-tight flex items-center">
-                        <Flag className="w-7 h-7 mr-3 text-primary-600" />
-                        Beslutningslogg
+                        <PenTool className="w-7 h-7 mr-3 text-primary-600" />
+                        Prosjektering
                     </h1>
-                    <p className="text-slate-500 font-medium text-sm mt-1">Søkbar tidslinje for viktige e-poster og beslutninger</p>
-                </div>
-                <div className="flex items-center gap-3">
-                    <div className="relative">
-                        <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                        <input
-                            type="text"
-                            placeholder="Søk i logg..."
-                            value={searchTerm}
-                            onChange={(e) => setSearchTerm(e.target.value)}
-                            className="bg-slate-50 border border-slate-200 rounded-xl pl-9 pr-4 py-2.5 text-sm font-medium focus:ring-2 focus:ring-primary-500/50 w-full sm:w-64 transition-all"
-                        />
-                    </div>
-                    <button onClick={() => setShowModal(true)} className="bg-primary-600 text-white px-5 py-2.5 rounded-xl font-bold text-sm shadow-[0_4px_12px_rgba(37,99,235,0.25)] hover:bg-primary-700 transition-colors flex items-center shrink-0">
-                        <Plus className="w-4 h-4 mr-2" />
-                        Loggfør
-                    </button>
+                    <p className="text-slate-500 font-medium text-sm mt-1">Styr dokumenter, mapper og beslutninger per fag</p>
                 </div>
             </div>
 
-            {loading && logs.length === 0 ? (
-                <div className="p-12 flex justify-center"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"></div></div>
-            ) : filteredLogs.length === 0 ? (
-                <div className="bg-white p-12 text-center text-slate-500 font-medium border border-slate-200 rounded-3xl shadow-sm">
-                    {searchTerm ? "Ingen treff for søket ditt." : "Ingen beslutninger loggført enda. Klikk 'Loggfør' for å starte."}
+            {loading && logs.length === 0 && files.length === 0 ? (
+                <div className="p-12 flex justify-center flex-1 items-center"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"></div></div>
+            ) : sortedSubcontractors.length === 0 ? (
+                <div className="bg-white p-12 text-center text-slate-500 font-medium border border-slate-200 rounded-3xl shadow-sm flex-1 flex items-center justify-center">
+                    Ingen underentreprenører valgt eller loggført enda.
                 </div>
             ) : (
-                <div className="space-y-4">
-                    {filteredLogs.map(log => (
-                        <div key={log.id} className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200/60 flex flex-col sm:flex-row gap-6 hover:shadow-md transition-shadow">
-                            <div className="sm:w-48 shrink-0 flex flex-col gap-3 border-b sm:border-b-0 sm:border-r border-slate-100 pb-4 sm:pb-0">
-                                <div className="flex items-center text-slate-700 font-bold text-sm">
-                                    <Calendar className="w-4 h-4 mr-2 text-slate-400" />
-                                    {new Date(log.date).toLocaleDateString('no-NO')}
-                                </div>
-                                {log.subcontractors && (
-                                    <div className="flex items-center text-slate-600 text-sm font-medium">
-                                        <Building2 className="w-4 h-4 mr-2 text-slate-400 shrink-0" />
-                                        <span className="truncate">{log.subcontractors.company_name}</span>
-                                    </div>
-                                )}
-                                {log.global_areas && (
-                                    <div className="flex items-start text-slate-600 text-sm font-medium">
-                                        <FileText className="w-4 h-4 mr-2 text-slate-400 shrink-0 mt-0.5" />
-                                        <span className="leading-tight">{log.global_areas.building} - {log.global_areas.floor} {log.global_areas.zone}</span>
-                                    </div>
-                                )}
-                            </div>
+                <div className="relative flex-1 min-h-0 min-w-0 flex">
+                    <div className="absolute inset-y-0 left-0 w-8 bg-gradient-to-r from-slate-50/50 to-transparent z-10 pointer-events-none" />
+                    <div className="absolute inset-y-0 right-0 w-8 bg-gradient-to-l from-slate-50/50 to-transparent z-10 pointer-events-none" />
+                    
+                    <div className="absolute top-1/2 -left-4 -translate-y-1/2 z-20">
+                         <button onClick={scrollLeft} className="bg-white p-2 rounded-full shadow-lg border border-slate-200 text-slate-600 hover:text-primary-600 hover:scale-110 transition-all hidden md:block">
+                            <ChevronLeft className="w-6 h-6" />
+                        </button>
+                    </div>
+                    <div className="absolute top-1/2 -right-4 -translate-y-1/2 z-20">
+                        <button onClick={scrollRight} className="bg-white p-2 rounded-full shadow-lg border border-slate-200 text-slate-600 hover:text-primary-600 hover:scale-110 transition-all hidden md:block">
+                            <ChevronRight className="w-6 h-6" />
+                        </button>
+                    </div>
+
+                    <div 
+                        ref={scrollContainerRef}
+                        className="flex gap-6 overflow-x-auto h-full pb-4 snap-x snap-mandatory flex-1 [&::-webkit-scrollbar]:hidden"
+                        style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
+                    >
+                        {sortedSubcontractors.map((subName) => {
+                            const data = logsBySubcontractor[subName];
+                            const isExpanded = expandedStacks[subName] || false;
                             
-                            <div className="flex-1">
-                                <h3 className="text-lg font-extrabold text-slate-800 mb-2">{log.subject}</h3>
-                                <p className="text-slate-600 text-sm whitespace-pre-wrap leading-relaxed">
-                                    {log.content}
-                                </p>
-                            </div>
-                        </div>
-                    ))}
+                            // Organize files by folders
+                            const rootFiles = data.files.filter(f => !f.folder_id);
+                            const foldersWithFiles = data.folders.map(folder => ({
+                                ...folder,
+                                files: data.files.filter(f => f.folder_id === folder.id)
+                            }));
+
+                            return (
+                                <div key={subName} className="flex-none w-full sm:w-[400px] lg:w-[450px] h-full flex flex-col bg-slate-100/50 rounded-3xl border border-slate-200 p-4 snap-start relative">
+                                    <div className="flex items-center justify-between mb-4 px-2 shrink-0">
+                                        <h2 className="font-extrabold text-slate-800 text-lg flex items-center gap-2">
+                                            <Building2 className="w-5 h-5 text-primary-600" />
+                                            <span className="truncate">{subName}</span>
+                                        </h2>
+                                    </div>
+
+                                    <div className="flex-1 overflow-y-auto space-y-8 pr-1 pb-12 scrollbar-thin scrollbar-thumb-slate-300 scrollbar-track-transparent">
+                                        
+                                        {/* My Files Section */}
+                                        <div className="bg-white p-5 rounded-2xl shadow-[0_2px_8px_-3px_rgba(0,0,0,0.1)] border border-slate-200/80">
+                                            <div className="flex items-center justify-between mb-4 border-b border-slate-100 pb-3">
+                                                <h3 className="text-sm font-bold text-slate-800 flex items-center">
+                                                    <FileIcon className="w-4 h-4 mr-2 text-primary-500" />
+                                                    Mine filer
+                                                </h3>
+                                                <div className="flex gap-2">
+                                                    <button onClick={() => { setFolderForm({...folderForm, subcontractor_id: data.subId || ''}); setShowFolderModal(true); }} className="p-1.5 text-slate-500 hover:bg-slate-100 rounded-lg hover:text-primary-600 transition-colors" title="Ny Mappe">
+                                                        <FolderPlus className="w-4 h-4" />
+                                                    </button>
+                                                    <button onClick={() => { setFileForm({...fileForm, subcontractor_id: data.subId || ''}); setShowFileModal(true); }} className="p-1.5 text-slate-500 hover:bg-slate-100 rounded-lg hover:text-primary-600 transition-colors" title="Ny Fil">
+                                                        <Upload className="w-4 h-4" />
+                                                    </button>
+                                                </div>
+                                            </div>
+
+                                            {/* Folder List */}
+                                            <div className="space-y-3">
+                                                {foldersWithFiles.map(folder => (
+                                                    <div key={folder.id} className="border border-slate-100 rounded-xl overflow-hidden group">
+                                                        <div className="bg-slate-50 px-3 py-2.5 flex items-center gap-2">
+                                                            <Folder className="w-4 h-4 text-amber-500 fill-amber-100" />
+                                                            <span className="text-sm font-bold text-slate-700 truncate">{folder.name}</span>
+                                                            <span className="ml-auto text-[10px] font-bold text-slate-400 bg-white px-2 rounded-md">{folder.files.length}</span>
+                                                        </div>
+                                                        <div className="bg-white p-2 flex flex-col gap-1">
+                                                            {folder.files.length === 0 ? (
+                                                                <span className="text-xs text-slate-400 italic px-2">Tom mappe</span>
+                                                            ) : folder.files.map(file => (
+                                                                <a key={file.id} href={file.file_url} target="_blank" rel="noopener noreferrer" className="text-xs font-semibold text-slate-600 hover:text-primary-600 hover:bg-primary-50 px-2 py-1.5 rounded-lg flex items-center truncate transition-colors">
+                                                                    <FileText className="w-3 h-3 mr-1.5 text-slate-400 shrink-0" />
+                                                                    <span className="truncate">{file.file_name}</span>
+                                                                </a>
+                                                            ))}
+                                                        </div>
+                                                    </div>
+                                                ))}
+
+                                                {/* Root files */}
+                                                {rootFiles.length > 0 && (
+                                                    <div className="pt-2 flex flex-col gap-1">
+                                                        {rootFiles.map(file => (
+                                                            <a key={file.id} href={file.file_url} target="_blank" rel="noopener noreferrer" className="text-xs font-semibold text-slate-600 hover:text-primary-600 hover:bg-primary-50 p-2 rounded-lg flex items-center truncate border border-slate-100 transition-colors">
+                                                                <FileText className="w-3.5 h-3.5 mr-2 text-slate-400 shrink-0" />
+                                                                <span className="truncate">{file.file_name}</span>
+                                                            </a>
+                                                        ))}
+                                                    </div>
+                                                )}
+
+                                                {foldersWithFiles.length === 0 && rootFiles.length === 0 && (
+                                                    <div className="text-center py-4">
+                                                        <span className="text-xs font-medium text-slate-400">Ingen filer lastet opp enda.</span>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </div>
+
+                                        {/* Decision Logs Section */}
+                                        <div className="relative">
+                                            {/* Toolbar for logs */}
+                                            <div className="flex flex-col gap-2 mb-6 sticky top-0 bg-slate-100/90 backdrop-blur z-30 pt-1 pb-3 px-1">
+                                                <div className="flex items-center justify-between">
+                                                    <h3 className="text-sm font-bold text-slate-800 flex items-center">
+                                                        <FileText className="w-4 h-4 mr-2 text-primary-500" />
+                                                        Beslutningslogg
+                                                    </h3>
+                                                    <button onClick={() => { setEditingLog(null); setLogForm({...logForm, subcontractor_id: data.subId || ''}); setShowLogModal(true); }} className="text-primary-600 hover:bg-primary-50 p-1.5 rounded-lg transition-colors" title="Nytt Logginnlegg">
+                                                        <Plus className="w-4 h-4" />
+                                                    </button>
+                                                </div>
+                                                
+                                                <div className="flex gap-2">
+                                                    <div className="relative flex-1">
+                                                        <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                                                        <input type="text" placeholder="Søk logg..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="bg-white border border-slate-200 rounded-lg pl-8 pr-3 py-1.5 text-xs font-medium focus:ring-1 focus:ring-primary-500/50 w-full" />
+                                                    </div>
+                                                    <select value={filterAreaId} onChange={(e) => setFilterAreaId(e.target.value)} className="bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-xs font-medium focus:ring-1 focus:ring-primary-500/50 max-w-[100px]">
+                                                        <option value="">Område</option>
+                                                        {areas.map(a => (<option key={a.id} value={a.id}>{a.building}</option>))}
+                                                    </select>
+                                                </div>
+                                            </div>
+
+                                            {/* Decision Logs Stack List */}
+                                            {data.logs.length > 0 ? (
+                                                <div className="relative" onClick={(e) => toggleStack(subName, e)}>
+                                                    
+                                                    <div className={`relative transition-all duration-500 ease-out ${isExpanded ? 'space-y-4' : ''}`} style={!isExpanded ? { height: 160 } : undefined}>
+                                                        {data.logs.map((log, index) => {
+                                                            const isTop = index === 0;
+                                                            const isSecond = index === 1;
+                                                            const isThird = index === 2;
+                                                            
+                                                            let offset = 0; let scale = 1; let zIndex = data.logs.length - index; let opacity = 1; let pointerEvents: 'auto' | 'none' = 'auto';
+
+                                                            if (!isExpanded) {
+                                                                pointerEvents = isTop ? 'auto' : 'none';
+                                                                if (isSecond) { offset = 12; scale = 0.96; } 
+                                                                else if (isThird) { offset = 24; scale = 0.92; } 
+                                                                else if (!isTop) { opacity = 0; offset = 30; scale = 0.9; }
+                                                            }
+
+                                                            if (!isExpanded && index > 2) return null;
+
+                                                            return (
+                                                                <div 
+                                                                    key={log.id} 
+                                                                    className={`bg-white p-5 rounded-2xl shadow-sm border border-slate-200/80 group flex flex-col transition-all duration-500 ${!isExpanded ? 'absolute top-0 left-0 right-0 cursor-pointer hover:-translate-y-1' : 'relative'}`}
+                                                                    style={!isExpanded ? {
+                                                                        transform: `translateY(${offset}px) scale(${scale})`, zIndex, opacity, pointerEvents,
+                                                                        boxShadow: isTop ? '0 10px 25px -5px rgba(0,0,0,0.05), border-b border-r' : '0 1px 3px rgba(0,0,0,0.05)'
+                                                                    } : undefined}
+                                                                >
+                                                                    <div className="flex justify-between items-start mb-3 border-b border-slate-100 pb-3 shrink-0">
+                                                                        <div className="flex items-center text-slate-500 font-bold text-xs bg-slate-50 px-2.5 py-1 rounded-lg">
+                                                                            <Calendar className="w-3.5 h-3.5 mr-1.5 text-primary-500" />
+                                                                            {new Date(log.date).toLocaleDateString('no-NO')}
+                                                                        </div>
+                                                                        <button 
+                                                                            onClick={(e) => { e.stopPropagation(); openEditLog(log); }} 
+                                                                            className={`text-slate-400 hover:text-primary-600 transition-colors p-1 bg-slate-50 rounded-lg hover:bg-primary-50 ${(!isExpanded && !isTop) ? 'hidden' : 'block'}`}
+                                                                        >
+                                                                            <Edit3 className="w-4 h-4" />
+                                                                        </button>
+                                                                    </div>
+                                                                    <h3 className="text-base font-extrabold text-slate-800 mb-2 leading-snug truncate">{log.subject}</h3>
+                                                                    <p className={`text-slate-600 text-sm whitespace-pre-wrap leading-relaxed ${!isExpanded ? 'line-clamp-2' : ''}`}>{log.content}</p>
+
+                                                                    {log.global_areas && (
+                                                                        <div className="flex items-center text-xs font-semibold text-slate-500 bg-slate-50 px-3 py-2 rounded-xl mt-4 shrink-0 border border-slate-100 w-fit">
+                                                                            <FileText className="w-3.5 h-3.5 mr-2 text-slate-400" />
+                                                                            <span className="truncate">{log.global_areas.building}</span>
+                                                                        </div>
+                                                                    )}
+                                                                </div>
+                                                            );
+                                                        })}
+                                                    </div>
+                                                    
+                                                    {!isExpanded && data.logs.length > 1 && (
+                                                        <div className="text-center mt-6">
+                                                            <span className="text-[10px] font-bold text-primary-600 bg-primary-50 px-3 py-1 rounded-full animate-pulse cursor-pointer">
+                                                                Klikk for å se hele ({data.logs.length})
+                                                            </span>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            ) : (
+                                                <div className="bg-white/50 border border-dashed border-slate-300 rounded-2xl p-6 text-center">
+                                                    <span className="text-xs font-bold text-slate-400">Ingen logger enda.</span>
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                </div>
+                            );
+                        })}
+                    </div>
                 </div>
             )}
 
-            {/* Modal for adding log */}
-            {showModal && (
+            {/* Modal for Log */}
+            {showLogModal && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm">
                     <div className="bg-white rounded-3xl w-full max-w-2xl shadow-2xl overflow-hidden border border-slate-200">
                         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 bg-slate-50">
                             <h3 className="text-lg font-extrabold text-slate-800 flex items-center">
-                                <Mail className="w-5 h-5 mr-2 text-slate-400" />
-                                Loggfør Beslutning / E-post
+                                {editingLog ? <Edit3 className="w-5 h-5 mr-2 text-slate-400" /> : <PenTool className="w-5 h-5 mr-2 text-slate-400" />}
+                                {editingLog ? 'Rediger Innlegg' : 'Nytt Innlegg'}
                             </h3>
-                            <button onClick={() => setShowModal(false)} className="text-slate-400 hover:text-red-500 p-1 rounded-lg transition-colors">
-                                <X className="w-5 h-5" />
-                            </button>
+                            <button onClick={() => setShowLogModal(false)} className="text-slate-400 hover:text-red-500 p-1 rounded-lg transition-colors"><X className="w-5 h-5" /></button>
                         </div>
                         <form onSubmit={handleSaveLog} className="p-6 space-y-5">
+                            ... existing form HTML replaced for brevity here ...
                             <div>
-                                <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-1.5">Emne / Tittel</label>
-                                <input
-                                    type="text"
-                                    required
-                                    value={newLog.subject}
-                                    onChange={(e) => setNewLog({ ...newLog, subject: e.target.value })}
-                                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 font-medium focus:ring-2 focus:ring-primary-500/50 text-slate-900"
-                                    placeholder="F.eks: Avklaring rundt kabelbro Høyblokk"
-                                />
+                                <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-1.5">Emne</label>
+                                <input type="text" required value={logForm.subject} onChange={(e) => setLogForm({ ...logForm, subject: e.target.value })} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 font-medium focus:ring-2 focus:ring-primary-500/50" />
                             </div>
-
                             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                                 <div>
                                     <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-1.5">Dato</label>
-                                    <input
-                                        type="date"
-                                        required
-                                        value={newLog.date}
-                                        onChange={(e) => setNewLog({ ...newLog, date: e.target.value })}
-                                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 font-medium focus:ring-2 focus:ring-primary-500/50 text-slate-900"
-                                    />
+                                    <input type="date" required value={logForm.date} onChange={(e) => setLogForm({ ...logForm, date: e.target.value })} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 font-medium focus:ring-2 focus:ring-primary-500/50" />
                                 </div>
                                 <div>
-                                    <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-1.5">Underentreprenør</label>
-                                    <select
-                                        value={newLog.subcontractor_id}
-                                        onChange={(e) => setNewLog({ ...newLog, subcontractor_id: e.target.value })}
-                                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 font-medium focus:ring-2 focus:ring-primary-500/50 text-slate-900"
-                                    >
-                                        <option value="">(Ingen valgt)</option>
-                                        {subcontractors.map(sub => (
-                                            <option key={sub.id} value={sub.id}>{sub.company_name}</option>
-                                        ))}
+                                    <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-1.5">Fag</label>
+                                    <select value={logForm.subcontractor_id} onChange={(e) => setLogForm({ ...logForm, subcontractor_id: e.target.value })} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 font-medium focus:ring-2 focus:ring-primary-500/50">
+                                        <option value="">(Ingen)</option>
+                                        {subcontractors.map(s => <option key={s.id} value={s.id}>{s.company_name}</option>)}
                                     </select>
                                 </div>
                                 <div>
                                     <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-1.5">Område</label>
-                                    <select
-                                        value={newLog.area_id}
-                                        onChange={(e) => setNewLog({ ...newLog, area_id: e.target.value })}
-                                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 font-medium focus:ring-2 focus:ring-primary-500/50 text-slate-900"
-                                    >
+                                    <select value={logForm.area_id} onChange={(e) => setLogForm({ ...logForm, area_id: e.target.value })} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 font-medium focus:ring-2 focus:ring-primary-500/50">
                                         <option value="">(Generelt)</option>
-                                        {areas.map(a => (
-                                            <option key={a.id} value={a.id}>{a.building} - {a.floor} {a.zone}</option>
-                                        ))}
+                                        {areas.map(a => <option key={a.id} value={a.id}>{a.building}</option>)}
                                     </select>
                                 </div>
                             </div>
-
                             <div>
-                                <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-1.5">Innhold / Beskjed</label>
-                                <textarea
-                                    required
-                                    rows={8}
-                                    value={newLog.content}
-                                    onChange={(e) => setNewLog({ ...newLog, content: e.target.value })}
-                                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 font-medium focus:ring-2 focus:ring-primary-500/50 text-slate-900"
-                                    placeholder="Lim inn innholdet fra e-posten eller beskriv beslutningen..."
-                                />
+                                <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-1.5">Innhold</label>
+                                <textarea required rows={6} value={logForm.content} onChange={(e) => setLogForm({ ...logForm, content: e.target.value })} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 font-medium focus:ring-2 focus:ring-primary-500/50" />
                             </div>
-
                             <div className="pt-2 flex gap-3">
-                                <button type="button" onClick={() => setShowModal(false)} className="flex-1 px-4 py-3 bg-white border border-slate-200 text-slate-700 font-bold rounded-xl hover:bg-slate-50 transition-colors">
-                                    Avbryt
-                                </button>
-                                <button disabled={loading} type="submit" className="flex-1 px-4 py-3 bg-primary-600 text-white font-bold rounded-xl shadow-[0_4px_12px_rgba(37,99,235,0.25)] hover:bg-primary-700 transition-colors disabled:opacity-50">
-                                    {loading ? 'Lagrer...' : 'Lagre Logg'}
-                                </button>
+                                <button type="button" onClick={() => setShowLogModal(false)} className="flex-1 px-4 py-3 bg-white border border-slate-200 text-slate-700 font-bold rounded-xl hover:bg-slate-50">Avbryt</button>
+                                <button disabled={loading} type="submit" className="flex-1 px-4 py-3 bg-primary-600 text-white font-bold rounded-xl shadow-sm hover:bg-primary-700 disabled:opacity-50">Lagre</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            )}
+
+            {/* Modal for Folder */}
+            {showFolderModal && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm">
+                    <div className="bg-white rounded-3xl w-full max-w-sm shadow-2xl overflow-hidden border border-slate-200">
+                        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 bg-slate-50">
+                            <h3 className="text-lg font-extrabold text-slate-800 flex items-center"><FolderPlus className="w-5 h-5 mr-2 text-slate-400" /> Ny Mappe</h3>
+                            <button onClick={() => setShowFolderModal(false)} className="text-slate-400 hover:text-red-500 p-1 rounded-lg transition-colors"><X className="w-5 h-5" /></button>
+                        </div>
+                        <form onSubmit={handleCreateFolder} className="p-6 space-y-5">
+                            <div>
+                                <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-1.5">Mappenavn</label>
+                                <input type="text" required value={folderForm.name} onChange={(e) => setFolderForm({ ...folderForm, name: e.target.value })} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 font-medium" placeholder="F.eks: Tegninger..." />
+                            </div>
+                            <div className="pt-2 flex gap-3">
+                                <button type="button" onClick={() => setShowFolderModal(false)} className="flex-1 px-4 py-3 bg-white border text-center font-bold rounded-xl hover:bg-slate-50">Avbryt</button>
+                                <button disabled={loading} type="submit" className="flex-1 px-4 py-3 bg-slate-800 text-white font-bold rounded-xl shadow-sm hover:bg-slate-900 disabled:opacity-50">Lagre</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            )}
+
+            {/* Modal for File Upload */}
+            {showFileModal && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm">
+                    <div className="bg-white rounded-3xl w-full max-w-lg shadow-2xl overflow-hidden border border-slate-200">
+                        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 bg-slate-50">
+                            <h3 className="text-lg font-extrabold text-slate-800 flex items-center"><Upload className="w-5 h-5 mr-2 text-slate-400" /> Last opp Fil</h3>
+                            <button onClick={() => setShowFileModal(false)} className="text-slate-400 hover:text-red-500 p-1 rounded-lg transition-colors"><X className="w-5 h-5" /></button>
+                        </div>
+                        <form onSubmit={handleUploadFile} className="p-6 space-y-5">
+                            <div>
+                                <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-1.5">Gjelder Fag</label>
+                                <select required value={fileForm.subcontractor_id} onChange={(e) => setFileForm({ ...fileForm, subcontractor_id: e.target.value })} className="w-full bg-slate-50 border-slate-200 rounded-xl px-4 py-2.5 font-medium">
+                                    <option value="">Velg underentreprenør...</option>
+                                    {subcontractors.map(sub => <option key={sub.id} value={sub.id}>{sub.company_name}</option>)}
+                                </select>
+                            </div>
+                            <div>
+                                <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-1.5">Velg Mappe</label>
+                                <select value={fileForm.folder_id} onChange={(e) => setFileForm({ ...fileForm, folder_id: e.target.value })} className="w-full bg-slate-50 border-slate-200 rounded-xl px-4 py-2.5 font-medium">
+                                    <option value="">(Ingen mappe - Rotnivå)</option>
+                                    {folders.filter(f => f.subcontractor_id === fileForm.subcontractor_id || !fileForm.subcontractor_id).map(f => (
+                                        <option key={f.id} value={f.id}>{f.name}</option>
+                                    ))}
+                                </select>
+                            </div>
+                            <div>
+                                <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-1.5">Fil</label>
+                                <input type="file" required onChange={(e) => setFileForm({...fileForm, file: e.target.files?.[0] || null})} className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-sm" />
+                            </div>
+                            <div className="pt-2 flex gap-3">
+                                <button type="button" onClick={() => setShowFileModal(false)} className="flex-1 px-4 py-3 bg-white border text-center font-bold rounded-xl hover:bg-slate-50">Avbryt</button>
+                                <button disabled={uploading || !fileForm.file} type="submit" className="flex-1 px-4 py-3 bg-slate-800 text-white font-bold rounded-xl shadow-sm hover:bg-slate-900 disabled:opacity-50">{uploading ? 'Laster opp...' : 'Lagre Fil'}</button>
                             </div>
                         </form>
                     </div>

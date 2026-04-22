@@ -232,8 +232,7 @@ export default function Bemanning() {
         setLoading(true);
 
         const validActivities = newManpower.billable_activities.filter(act => act.activity_id);
-        const payload = {
-            id: newManpower.id || undefined,
+        const payload: any = {
             subcontractor_id: selectedSubcontractorId,
             date: newManpower.date,
             workers_count: (Number(newManpower.contract_workers) || 0) + (Number(newManpower.billable_workers) || 0),
@@ -247,6 +246,10 @@ export default function Bemanning() {
             hours_billable: validActivities.reduce((sum, act) => sum + (Number(act.hours) || 0), 0),
             billable_activities: validActivities
         };
+
+        if (newManpower.id) {
+            payload.id = newManpower.id;
+        }
 
         let response;
         if (newManpower.id) {
