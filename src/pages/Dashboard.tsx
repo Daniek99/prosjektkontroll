@@ -47,8 +47,8 @@ export default function Dashboard() {
 
                     return {
                         id: sub.id,
-                        name: sub.name,
-                        trade: sub.trade_category,
+                        name: sub.company_name || 'Ukjent firma',
+                        trade: sub.trade || 'Ukjent fag',
                         contact: sub.contact_person || 'Ingen satt',
                         email: sub.email || '',
                         manpowerToday: mp && mp[0] ? mp[0].workers_count : 0,
@@ -61,7 +61,7 @@ export default function Dashboard() {
 
             const { data: tasks } = await supabase
                 .from('work_activities')
-                .select('*, subcontractors(name)')
+                .select('*, subcontractors(company_name)')
                 .neq('status', 'completed');
 
             if (tasks) {
@@ -73,7 +73,7 @@ export default function Dashboard() {
                 const alerts: any[] = [];
 
                 tasks.forEach(task => {
-                    const subName = task.subcontractors?.name || 'Ukjent fag';
+                    const subName = task.subcontractors?.company_name || 'Ukjent fag';
                     
                     if (task.start_date) {
                         const start = new Date(task.start_date);

@@ -1,7 +1,8 @@
 import { useEffect, useState, useRef } from 'react';
 import { useSubcontractor } from '../contexts/SubcontractorContext';
 import { supabase } from '../lib/supabase';
-import { Camera, MapPin, Image as ImageIcon, Plus, X, UploadCloud, Calendar as CalendarIcon, Pencil, Trash2, EyeOff, Eye, Edit2 } from 'lucide-react';
+import { Camera, MapPin, Image as ImageIcon, Plus, X, UploadCloud, Calendar as CalendarIcon, Pencil, Trash2, EyeOff, Eye, Edit2, ChevronLeft, ChevronRight } from 'lucide-react';
+import PdfViewer from '../components/PdfViewer';
 
 interface ProjectArea {
     id: string;
@@ -26,6 +27,7 @@ interface GridData {
     columns: GridDataCol[];
     cells: Record<string, any>; // legacy colors or CellData
     trades: { name: string, color: string }[];
+    isWeekBased?: boolean;
 }
 
 const getIsoWeek = (date: Date) => {
@@ -160,6 +162,9 @@ export default function Progress() {
     const [newPlanData, setNewPlanData] = useState({ name: '', type: 'week', startWeek: getIsoWeek(new Date()) });
     const [newPhoto, setNewPhoto] = useState<{ id?: string, area: string, area_id: string, photo_url: string, notes: string, date: string }>({ area: '', area_id: '', photo_url: '', notes: '', date: new Date().toISOString().split('T')[0] });
     const fileInputRef = useRef<HTMLInputElement>(null);
+    const scrollContainerRef = useRef<HTMLDivElement>(null);
+    const currentWeekRef = useRef<HTMLTableCellElement>(null);
+    const [visibleColIndex, setVisibleColIndex] = useState(0);
 
     const activePlan = plansData.plans.find(p => p.id === plansData.activePlanId) || plansData.plans[0] || defaultPlansData.plans[0];
     const gridData = activePlan?.grid || defaultGrid;
@@ -285,14 +290,11 @@ export default function Progress() {
             if (photoData) setPhotos(photoData);
             if (areaData) setAreas(areaData);
             if (gridRes && gridRes.grid_data) {
-                const gData = gridRes.grid_data as any;
-                if (gData.plans) {
-                    setPlansData(gData);
-                    historyRef.current = [gData];
-                    historyIndexRef.current = 0;
-                } else {
-                    // Legacy upgrade
-                    const upgradedData = {
+                let gData = gridRes.grid_data as any;
+                
+                // Legacy upgrade
+                if (!gData.plans) {
+                    gData = {
                         activePlanId: 'plan-orig',
                         plans: [
                             {
@@ -307,10 +309,51 @@ export default function Progress() {
                             }
                         ]
                     };
-                    setPlansData(upgradedData);
-                    historyRef.current = [upgradedData];
-                    historyIndexRef.current = 0;
                 }
+
+                // Ensure 31 weeks around current week exist if it's a week-based plan
+                const currentIsoWeek = getIsoWeek(new Date());
+                gData.plans = gData.plans.map((plan: any) => {
+                    const isWeekPlan = plan.grid.isWeekBased !== false && plan.grid.columns.some((c: any) => c.label.toLowerCase().includes('uke') || c.label.match(/u\s*\d+/i));
+                    if (isWeekPlan) {
+                        const expectedWeeks = [];
+                        for (let i = -15; i <= 15; i++) {
+                            let w = currentIsoWeek + i;
+                            if (w <= 0) w += 52;
+                            if (w > 52) w -= 52;
+                            expectedWeeks.push(`Uke ${w}`);
+                        }
+                        const newColumns = [...plan.grid.columns];
+                        let changed = false;
+                        expectedWeeks.forEach((expectedLabel, idx) => {
+                            if (!newColumns.some(c => c.label.toLowerCase() === expectedLabel.toLowerCase())) {
+                                newColumns.push({ id: `c_auto_${Date.now()}_${idx}`, label: expectedLabel });
+                                changed = true;
+                            }
+                        });
+                        if (changed) {
+                            newColumns.sort((a, b) => {
+                                const matchA = a.label.match(/\d+/);
+                                const matchB = b.label.match(/\d+/);
+                                if (matchA && matchB) {
+                                    let numA = parseInt(matchA[0]);
+                                    let numB = parseInt(matchB[0]);
+                                    if (Math.abs(numA - numB) > 26) {
+                                        return numA < numB ? 1 : -1;
+                                    }
+                                    return numA - numB;
+                                }
+                                return 0;
+                            });
+                            return { ...plan, grid: { ...plan.grid, columns: newColumns } };
+                        }
+                    }
+                    return plan;
+                });
+
+                setPlansData(gData);
+                historyRef.current = [gData];
+                historyIndexRef.current = 0;
             } else {
                 setPlansData(defaultPlansData);
                 historyRef.current = [defaultPlansData];
@@ -507,12 +550,9 @@ export default function Progress() {
     const handleCellPointerDown = (e: React.PointerEvent, rIdx: number, cIdx: number) => {
         if (e.button !== 0) return; // Only left click
         
-        const visibleRows = gridData.rows.filter(r => showHidden || !r.hidden);
-        const visibleCols = gridData.columns.filter(c => showHidden || !c.hidden);
-        const rowId = visibleRows[rIdx].id;
-        const colId = visibleCols[cIdx].id;
-        const cellKey = `${rowId}_${colId} `;
-        const cellVal = gridData.cells[cellKey];
+        try {
+            (e.target as Element).releasePointerCapture(e.pointerId);
+        } catch (err) {}
         
         // Check if clicked inside an existing selection
         let isInsideSelection = false;
@@ -526,7 +566,7 @@ export default function Progress() {
             }
         }
 
-        if (isInsideSelection && cellVal) {
+        if (isInsideSelection) {
             // Start dragging the existing selection
             setIsDragging(true);
             setIsSelecting(false);
@@ -536,20 +576,8 @@ export default function Progress() {
                 originalSelectionStart: { ...selectionStart! },
                 originalSelectionEnd: { ...selectionEnd! }
             };
-        } else if (cellVal) {
-            // Start dragging a single cell
-            setIsDragging(true);
-            setIsSelecting(false);
-            setSelectionStart({ rIdx, cIdx });
-            setSelectionEnd({ rIdx, cIdx });
-            cellDragRef.current = {
-                startRIdx: rIdx,
-                startCIdx: cIdx,
-                originalSelectionStart: { rIdx, cIdx },
-                originalSelectionEnd: { rIdx, cIdx }
-            };
         } else {
-            // Start a new selection
+            // Start a new selection (even if it's an existing cell)
             setIsSelecting(true);
             setIsDragging(false);
             setSelectionStart({ rIdx, cIdx });
@@ -559,7 +587,8 @@ export default function Progress() {
         }
     };
 
-    const handleCellPointerMove = (_e: React.PointerEvent, rIdx: number, cIdx: number) => {
+    const handleCellPointerEnter = (e: React.PointerEvent, rIdx: number, cIdx: number) => {
+        if (e.buttons !== 1) return; // Must hold left click
         if (isSelecting) {
             setSelectionEnd({ rIdx, cIdx });
         } else if (isDragging && cellDragRef.current) {
@@ -884,6 +913,33 @@ export default function Progress() {
         setShowModal(true);
     };
 
+    const currentIsoWeek = getIsoWeek(new Date());
+    const isCurrentWeek = (label: string) => {
+        if (gridData.isWeekBased === false) return false;
+        const match = label.match(/\d+/);
+        return match && parseInt(match[0]) === currentIsoWeek;
+    };
+
+    useEffect(() => {
+        if (!loading) {
+            const activePlan = plansData.plans.find(p => p.id === plansData.activePlanId);
+            if (activePlan) {
+                const visibleCols = activePlan.grid.columns.filter(c => showHidden || !c.hidden);
+                const currentWeekIdx = visibleCols.findIndex(c => {
+                    if (activePlan.grid.isWeekBased === false) return false;
+                    const match = c.label.match(/\d+/);
+                    return match && parseInt(match[0]) === currentIsoWeek;
+                });
+                if (currentWeekIdx !== -1) {
+                    setVisibleColIndex(Math.max(0, currentWeekIdx - 15));
+                }
+            }
+        }
+    }, [loading, plansData.activePlanId, showHidden, activePlan?.grid.isWeekBased]);
+
+    const visibleCols = gridData.columns.filter(c => showHidden || !c.hidden);
+    const paginatedCols = visibleCols.slice(visibleColIndex, visibleColIndex + 31);
+
     if (!selectedSubcontractorId) {
         return (
             <div className="flex flex-col items-center justify-center py-20 bg-white rounded-3xl border border-dashed border-slate-300">
@@ -972,6 +1028,10 @@ export default function Progress() {
                                         <button onClick={handleCreatePlan} className="text-primary-600 hover:bg-primary-50 p-2 rounded-lg transition-colors" title="Ny plan"><Plus className="w-5 h-5" /></button>
                                         <button onClick={handleRenamePlan} className="text-slate-400 hover:bg-slate-100 hover:text-slate-700 p-2 rounded-lg transition-colors" title="Bruk nytt navn på denne planen"><Pencil className="w-4 h-4" /></button>
                                         <button onClick={handleDeletePlan} className="text-slate-400 hover:bg-red-50 hover:text-red-600 p-2 rounded-lg transition-colors" title="Slett denne planen"><Trash2 className="w-4 h-4" /></button>
+                                        <label className="flex items-center gap-2 text-sm font-medium text-slate-700 ml-2 border-l pl-4 border-slate-200 cursor-pointer">
+                                            <input type="checkbox" checked={gridData.isWeekBased !== false} onChange={(e) => saveGrid({ ...gridData, isWeekBased: e.target.checked })} className="rounded text-primary-600 focus:ring-primary-500 w-4 h-4" />
+                                            Bruk uker som periode
+                                        </label>
                                     </div>
                                     <div className="flex items-center gap-2">
                                         <div className="flex gap-2 flex-wrap">
@@ -993,10 +1053,17 @@ export default function Progress() {
                             </div>
 
                             {/* Grid Builder */}
-                            <div className="border border-slate-200 rounded-xl overflow-hidden bg-white shadow-sm w-max max-w-full overflow-x-auto">
-                                <table className="w-full text-left border-collapse whitespace-nowrap">
-                                    <thead>
-                                        <tr className="bg-slate-50">
+                            <div className="relative border border-slate-200 rounded-xl bg-white shadow-sm group/grid">
+                                <button onClick={() => setVisibleColIndex(Math.max(0, visibleColIndex - 4))} disabled={visibleColIndex === 0} className="absolute left-[250px] top-1/2 -translate-y-1/2 z-30 bg-white border border-slate-200 shadow-[4px_0_12px_rgba(0,0,0,0.1)] rounded-r-xl py-4 px-1.5 hover:bg-slate-50 opacity-0 group-hover/grid:opacity-100 transition-opacity flex items-center justify-center disabled:opacity-0">
+                                    <ChevronLeft className="w-5 h-5 text-slate-600" />
+                                </button>
+                                <button onClick={() => setVisibleColIndex(Math.min(visibleCols.length - 31, visibleColIndex + 4))} disabled={visibleColIndex >= visibleCols.length - 31} className="absolute right-0 top-1/2 -translate-y-1/2 z-30 bg-white border border-slate-200 shadow-[-4px_0_12px_rgba(0,0,0,0.1)] rounded-l-xl py-4 px-1.5 hover:bg-slate-50 opacity-0 group-hover/grid:opacity-100 transition-opacity flex items-center justify-center disabled:opacity-0">
+                                    <ChevronRight className="w-5 h-5 text-slate-600" />
+                                </button>
+                                <div ref={scrollContainerRef} className="overflow-x-auto w-full" style={{ touchAction: 'pan-x pan-y' }}>
+                                    <table className="w-max text-left border-collapse whitespace-nowrap min-w-full">
+                                        <thead>
+                                            <tr className="bg-slate-50">
                                             <th className="p-3 border-b border-r border-slate-200 min-w-[250px] sticky left-0 z-10 bg-slate-50 text-xs font-bold text-slate-500 uppercase flex flex-col justify-end min-h-[48px]">
                                                 <div className="flex justify-between items-center w-full h-full">
                                                     <span>Område / Etasje</span>
@@ -1005,20 +1072,22 @@ export default function Progress() {
                                                     </button>
                                                 </div>
                                             </th>
-                                            {gridData.columns.filter(c => showHidden || !c.hidden).map((col, idx, arr) => (
-                                                <th key={col.id} className={`p-2 border-b border-slate-200 min-w-[80px] text-center text-xs font-bold text-slate-700 relative group ${col.hidden ? 'bg-slate-100/50 opacity-50' : ''}`}>
-                                                    <div className="flex flex-col items-center justify-center w-full h-full relative pb-5">
-                                                        <span>{col.label}</span>
-                                                        <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity absolute bottom-0 left-1/2 -translate-x-1/2 z-30">
-                                                            <button onClick={() => toggleHideCol(col.id, !col.hidden)} className="text-slate-500 hover:text-primary-600 p-1 rounded hover:bg-slate-200" title={col.hidden ? 'Vis' : 'Skjul'}>
-                                                                {col.hidden ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
+                                            {paginatedCols.map((col, paginatedIdx) => {
+                                                const isCurrent = isCurrentWeek(col.label);
+                                                return (
+                                                <th key={col.id} ref={isCurrent ? currentWeekRef : null} className={`p-1.5 border-b border-slate-200 min-w-[48px] text-center text-[11px] font-extrabold relative group ${col.hidden ? 'bg-slate-100/50 opacity-50' : ''} ${isCurrent ? 'bg-blue-100 text-blue-800' : 'text-slate-700'}`}>
+                                                    <div className="flex flex-col items-center justify-center w-full h-full relative pb-4">
+                                                        <span className="truncate max-w-[40px]" title={col.label}>{col.label.replace(/Uke\s+/i, 'U')}</span>
+                                                        <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity absolute bottom-0 left-1/2 -translate-x-1/2 z-30 bg-white/90 rounded px-1 shadow-sm border border-slate-100">
+                                                            <button onClick={() => toggleHideCol(col.id, !col.hidden)} className="text-slate-500 hover:text-primary-600 p-0.5 rounded" title={col.hidden ? 'Vis' : 'Skjul'}>
+                                                                {col.hidden ? <Eye className="w-3 h-3" /> : <EyeOff className="w-3 h-3" />}
                                                             </button>
-                                                            <button onClick={() => deleteCol(col.id)} className="text-slate-500 hover:text-red-600 p-1 rounded hover:bg-red-100" title="Fjern">
-                                                                <Trash2 className="w-3.5 h-3.5" />
+                                                            <button onClick={() => deleteCol(col.id)} className="text-slate-500 hover:text-red-600 p-0.5 rounded" title="Fjern">
+                                                                <Trash2 className="w-3 h-3" />
                                                             </button>
                                                         </div>
                                                     </div>
-                                                    {idx === arr.length - 1 && (
+                                                    {paginatedIdx === paginatedCols.length - 1 && (
                                                         <div
                                                             className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-primary-500 cursor-ew-resize translate-y-[40%] translate-x-[40%] rounded-sm z-20 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center pointer-events-auto"
                                                             onPointerDown={(e) => startDrag(e, 'col')}
@@ -1027,7 +1096,7 @@ export default function Progress() {
                                                         </div>
                                                     )}
                                                 </th>
-                                            ))}
+                                            )})}
                                             <th className="p-3 border-b border-slate-200 min-w-[160px] text-center align-middle">
                                                 <div className="flex flex-col items-center justify-center gap-1.5">
                                                     <button
@@ -1077,7 +1146,9 @@ export default function Progress() {
                                                         </div>
                                                     )}
                                                 </td>
-                                                {gridData.columns.filter(c => showHidden || !c.hidden).map((col, colIdx) => {
+                                                {paginatedCols.map((col, paginatedIdx) => {
+                                                    const colIdx = visibleColIndex + paginatedIdx;
+                                                    const isCurrent = isCurrentWeek(col.label);
                                                     const cellKey = `${row.id}_${col.id} `;
                                                     const cellVal = gridData.cells[cellKey];
                                                     let cellColor = '';
@@ -1092,9 +1163,9 @@ export default function Progress() {
                                                         <td
                                                             key={col.id}
                                                             onPointerDown={(e) => handleCellPointerDown(e, idx, colIdx)}
-                                                            onPointerMove={(e) => handleCellPointerMove(e, idx, colIdx)}
+                                                            onPointerEnter={(e) => handleCellPointerEnter(e, idx, colIdx)}
                                                             onPointerUp={handleCellPointerUp}
-                                                            className={`border-b border-slate-100 cursor-pointer transition-colors m-1 select-none relative group/cell ${isCellSelected(idx, colIdx) ? 'bg-primary-50 ring-1 ring-inset ring-primary-300' : 'hover:bg-slate-50'}`}
+                                                            className={`border-b border-slate-100 cursor-pointer transition-colors p-[2px] select-none relative group/cell touch-none ${isCellSelected(idx, colIdx) ? 'bg-primary-50 ring-1 ring-inset ring-primary-300' : isCurrent ? 'bg-blue-50 hover:bg-blue-100' : 'hover:bg-slate-50'}`}
                                                         >
                                                             <div className="w-full h-6 p-0.5 flex items-center justify-center relative pointer-events-none">
                                                                 {cellColor && (
@@ -1150,10 +1221,11 @@ export default function Progress() {
                                                     </div>
                                                 </div>
                                             </td>
-                                            <td colSpan={gridData.columns.filter(c => showHidden || !c.hidden).length + 1} className="border-b border-slate-100 bg-slate-50/10"></td>
+                                            <td colSpan={paginatedCols.length + 1} className="border-b border-slate-100 bg-slate-50/10"></td>
                                         </tr>
                                     </tbody>
                                 </table>
+                                </div>
                             </div>
 
                             {/* Bulk Actions Floating Bar */}
@@ -1680,12 +1752,16 @@ export default function Progress() {
                             </button>
                         </div>
                     </div>
-                    <div className="flex-1 overflow-hidden">
-                        <iframe
-                            src={previewPlan.file_url}
-                            className="w-full h-full"
-                            title={previewPlan.name}
-                        />
+                    <div className="flex-1 overflow-hidden bg-slate-100 flex justify-center items-center relative">
+                        {previewPlan.name.toLowerCase().endsWith('.pdf') || previewPlan.file_url.toLowerCase().includes('.pdf') ? (
+                            <PdfViewer url={previewPlan.file_url} />
+                        ) : (
+                            <iframe
+                                src={previewPlan.file_url}
+                                className="w-full h-full border-none bg-white"
+                                title={previewPlan.name}
+                            />
+                        )}
                     </div>
                 </div>
             )}

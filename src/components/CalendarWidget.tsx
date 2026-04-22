@@ -104,8 +104,9 @@ export default function CalendarWidget() {
             console.error('Login Failed', error);
             setErrorMsg("Innlogging feilet. Prøv igjen.");
         },
-        scope: 'https://www.googleapis.com/auth/calendar.events',
+        scope: 'https://www.googleapis.com/auth/calendar https://www.googleapis.com/auth/calendar.events',
         flow: 'implicit',
+        prompt: 'consent',
     });
 
     const handleLoginClick = () => {
@@ -158,13 +159,14 @@ export default function CalendarWidget() {
             } else {
                 const errText = await response.text();
                 console.error("Failed to fetch events", errText);
-                if (response.status === 401) {
+                if (response.status === 401 || response.status === 403) {
                     setIsAuthenticated(false);
                     setAccessToken(null);
                     localStorage.removeItem('google_access_token');
                     localStorage.removeItem('google_token_expires_at');
-                } else if (response.status === 403) {
-                    setErrorMsg("Mangler tillatelse. Har du aktivert 'Google Calendar API' i Google Cloud Console?");
+                    if (response.status === 403) {
+                        setErrorMsg("Mangler tillatelse. Sørg for å krysse av for alle tilganger når du logger inn, eller sjekk om Calendar API er aktivert.");
+                    }
                 } else {
                     setErrorMsg(`Kunne ikke hente kalender: ${response.status}`);
                 }
