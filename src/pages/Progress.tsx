@@ -1,8 +1,9 @@
 import { useEffect, useState, useRef } from 'react';
 import { useSubcontractor } from '../contexts/SubcontractorContext';
 import { supabase } from '../lib/supabase';
-import { Camera, MapPin, Image as ImageIcon, Plus, X, UploadCloud, Calendar as CalendarIcon, Pencil, Trash2, EyeOff, Eye, Edit2, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Camera, MapPin, Image as ImageIcon, Plus, X, UploadCloud, Calendar as CalendarIcon, Pencil, Trash2, EyeOff, Eye, Edit2, ChevronLeft, ChevronRight, ArrowUpDown } from 'lucide-react';
 import PdfViewer from '../components/PdfViewer';
+import DatePickerWithWeek from '../components/DatePickerWithWeek';
 
 interface ProjectArea {
     id: string;
@@ -150,6 +151,10 @@ export default function Progress() {
     const [showHidden, setShowHidden] = useState(false);
     const [projectPlans, setProjectPlans] = useState<{ id: string, name: string, file_url: string }[]>([]);
     const [progressTasks, setProgressTasks] = useState<ProgressTask[]>([]);
+    const [sortBy, setSortBy] = useState<'start_date' | 'expected_end_date' | 'deadline'>('start_date');
+    const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
+    const [prioritizeActive, setPrioritizeActive] = useState<boolean>(false);
+    const [hideCompleted, setHideCompleted] = useState<boolean>(false);
     const [showTaskModal, setShowTaskModal] = useState(false);
     const [currentTask, setCurrentTask] = useState<Partial<ProgressTask>>({});
     const [showUploadPlanModal, setShowUploadPlanModal] = useState(false);
@@ -168,6 +173,37 @@ export default function Progress() {
 
     const activePlan = plansData.plans.find(p => p.id === plansData.activePlanId) || plansData.plans[0] || defaultPlansData.plans[0];
     const gridData = activePlan?.grid || defaultGrid;
+
+    const processedTasks = (() => {
+        let tasks = [...progressTasks];
+
+        if (hideCompleted) {
+            tasks = tasks.filter(t => t.status !== 'completed');
+        }
+
+        tasks.sort((a, b) => {
+            if (prioritizeActive) {
+                const aActive = a.status === 'planned' || a.status === 'in_progress';
+                const bActive = b.status === 'planned' || b.status === 'in_progress';
+                if (aActive && !bActive) return -1;
+                if (!aActive && bActive) return 1;
+            }
+
+            const valA = a[sortBy];
+            const valB = b[sortBy];
+
+            if (!valA && !valB) return 0;
+            if (!valA) return 1;
+            if (!valB) return -1;
+
+            const timeA = new Date(valA).getTime();
+            const timeB = new Date(valB).getTime();
+
+            return sortOrder === 'asc' ? timeA - timeB : timeB - timeA;
+        });
+
+        return tasks;
+    })();
 
     const cellDragRef = useRef<{ startRIdx: number, startCIdx: number, originalSelectionStart: {rIdx: number, cIdx: number} | null, originalSelectionEnd: {rIdx: number, cIdx: number} | null } | null>(null);
     const isDraggingRef = useRef<{ type: 'row' | 'col', startX: number, startY: number, addedCount: number, initialRows: { id: string, label: string }[], initialCols: { id: string, label: string }[] } | null>(null);
@@ -545,6 +581,19 @@ export default function Progress() {
         if (!confirm('Vil du slette aktiviteten?')) return;
         await supabase.from('work_activities').delete().eq('id', id);
         setProgressTasks(progressTasks.filter(t => t.id !== id));
+    };
+
+    const handleTaskInlineChange = async (task: ProgressTask, field: keyof ProgressTask, value: any) => {
+        const payload = { [field]: value };
+        
+        // Optimistic update
+        setProgressTasks(progressTasks.map(t => t.id === task.id ? { ...t, ...payload } : t));
+        
+        const { error } = await supabase.from('work_activities').update(payload).eq('id', task.id);
+        if (error) {
+            alert('Kunne ikke oppdatere aktivitet: ' + error.message);
+            // Revert optimistic update by fetching or just reload, but keeping it simple here
+        }
     };
 
     const handleCellPointerDown = (e: React.PointerEvent, rIdx: number, cIdx: number) => {
@@ -1279,37 +1328,142 @@ export default function Progress() {
                         <p className="text-slate-500 font-medium">Ingen aktiviteter opprettet enda.</p>
                     </div>
                 ) : (
-                    <div className="overflow-x-auto border border-slate-200 rounded-2xl bg-white shadow-sm">
-                        <table className="w-full text-left text-sm whitespace-nowrap">
-                            <thead className="bg-slate-50/80 text-slate-500 uppercase tracking-wider font-extrabold text-xs border-b border-slate-200">
-                                <tr>
-                                    <th className="p-4">Aktivitet / Beskrivelse</th>
-                                    <th className="p-4">Oppstart</th>
-                                    <th className="p-4 text-primary-700 bg-primary-50/50">Forventet ferdig</th>
-                                    <th className="p-4 text-red-600 bg-red-50/50">Frist (Deadline)</th>
-                                    <th className="p-4">Status</th>
-                                    <th className="p-4">Handlinger</th>
-                                </tr>
-                            </thead>
-                            <tbody className="divide-y divide-slate-100">
-                                {progressTasks.map(task => (
-                                    <tr key={task.id} className="hover:bg-slate-50 transition-colors">
-                                        <td className="p-4 font-bold text-slate-800 border-r border-slate-100">{task.name}</td>
-                                        <td className="p-4 font-semibold text-slate-600 border-r border-slate-100">{task.start_date ? new Date(task.start_date).toLocaleDateString('no-NO') : '-'}</td>
-                                        <td className="p-4 font-bold text-primary-700 bg-primary-50/20 border-r border-slate-100">{task.expected_end_date ? new Date(task.expected_end_date).toLocaleDateString('no-NO') : '-'}</td>
-                                        <td className="p-4 font-bold text-red-600 bg-red-50/20 border-r border-slate-100">{task.deadline ? new Date(task.deadline).toLocaleDateString('no-NO') : '-'}</td>
-                                        <td className="p-4">
-                                            <span className={`px-2 py-1 rounded-md text-[10px] font-bold uppercase border ${task.status === 'completed' ? 'bg-green-50 text-green-700 border-green-200' : task.status === 'in_progress' ? 'bg-yellow-50 text-yellow-700 border-yellow-200' : 'bg-slate-50 text-slate-600 border-slate-200'}`}>{task.status === 'completed' ? 'Ferdig' : task.status === 'in_progress' ? 'Påbegynt' : 'Planlagt'}</span>
-                                        </td>
-                                        <td className="p-4 flex gap-2">
-                                            <button onClick={() => { setCurrentTask(task); setShowTaskModal(true); }} className="p-2 text-slate-400 hover:text-primary-600 hover:bg-primary-50 border border-transparent hover:border-primary-100 rounded-lg transition-all"><Edit2 className="w-4 h-4" /></button>
-                                            <button onClick={() => handleDeleteTask(task.id)} className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 border border-transparent hover:border-red-100 rounded-lg transition-all"><Trash2 className="w-4 h-4" /></button>
-                                        </td>
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
-                    </div>
+                    <>
+                        {/* Verktøylinje for sortering og filtrering */}
+                        <div className="flex flex-wrap items-center justify-between gap-4 p-4 mb-6 bg-slate-50 rounded-2xl border border-slate-200/80 shadow-sm transition-all">
+                            <div className="flex flex-wrap items-center gap-4">
+                                <div className="flex items-center gap-2.5">
+                                    <span className="text-xs font-extrabold text-slate-500 uppercase tracking-wider flex items-center">
+                                        <ArrowUpDown className="w-3.5 h-3.5 mr-1 text-slate-400" />
+                                        Sorter etter:
+                                    </span>
+                                    <select
+                                        value={sortBy}
+                                        onChange={(e) => setSortBy(e.target.value as any)}
+                                        className="bg-white border border-slate-200 text-slate-700 text-xs font-bold rounded-xl focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 block p-2 shadow-sm cursor-pointer hover:bg-slate-50 transition-all outline-none"
+                                    >
+                                        <option value="start_date">Oppstartsdato</option>
+                                        <option value="expected_end_date">Forventet ferdig</option>
+                                        <option value="deadline">Frist</option>
+                                    </select>
+                                    <button
+                                        onClick={() => setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc')}
+                                        className="bg-white border border-slate-200 hover:bg-slate-50 text-slate-600 p-2 rounded-xl shadow-sm transition-all hover:text-slate-800 focus:outline-none focus:ring-2 focus:ring-primary-500/20 flex items-center justify-center"
+                                        title={sortOrder === 'asc' ? 'Sorter stigende' : 'Sorter synkende'}
+                                    >
+                                        <ArrowUpDown className={`w-3.5 h-3.5 transition-transform duration-300 ${sortOrder === 'desc' ? 'rotate-180 text-primary-600' : ''}`} />
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div className="flex flex-wrap items-center gap-3">
+                                <label className={`flex items-center gap-2 text-xs font-bold px-3 py-2 rounded-xl border cursor-pointer select-none transition-all duration-200 shadow-sm ${prioritizeActive ? 'bg-primary-50 border-primary-200 text-primary-700' : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'}`}>
+                                    <input
+                                        type="checkbox"
+                                        checked={prioritizeActive}
+                                        onChange={(e) => setPrioritizeActive(e.target.checked)}
+                                        className="rounded text-primary-600 focus:ring-primary-500 w-4 h-4 cursor-pointer"
+                                    />
+                                    Planlagt/påbegynt øverst
+                                </label>
+
+                                <label className={`flex items-center gap-2 text-xs font-bold px-3 py-2 rounded-xl border cursor-pointer select-none transition-all duration-200 shadow-sm ${hideCompleted ? 'bg-primary-50 border-primary-200 text-primary-700' : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'}`}>
+                                    <input
+                                        type="checkbox"
+                                        checked={hideCompleted}
+                                        onChange={(e) => setHideCompleted(e.target.checked)}
+                                        className="rounded text-primary-600 focus:ring-primary-500 w-4 h-4 cursor-pointer"
+                                    />
+                                    Skjul ferdige
+                                </label>
+                            </div>
+                        </div>
+
+                        {processedTasks.length === 0 ? (
+                            <div className="text-center py-12 bg-slate-50 rounded-2xl border border-dashed border-slate-200 flex flex-col items-center justify-center">
+                                <p className="text-slate-500 font-bold">Ingen aktiviteter matcher de valgte filtrene.</p>
+                                <button
+                                    onClick={() => { setHideCompleted(false); setPrioritizeActive(false); }}
+                                    className="mt-3 bg-primary-50 text-primary-700 px-4 py-2 rounded-xl font-bold text-xs border border-primary-100 hover:bg-primary-100 transition-all shadow-sm"
+                                >
+                                    Nullstill filtre
+                                </button>
+                            </div>
+                        ) : (
+                            <div className="overflow-x-auto border border-slate-200 rounded-2xl bg-white shadow-sm">
+                                <table className="w-full text-left text-sm whitespace-nowrap">
+                                    <thead className="bg-slate-50/80 text-slate-500 uppercase tracking-wider font-extrabold text-xs border-b border-slate-200">
+                                        <tr>
+                                            <th className="p-4">Aktivitet / Beskrivelse</th>
+                                            <th className="p-4">Oppstart</th>
+                                            <th className="p-4 text-primary-700 bg-primary-50/50">Forventet ferdig</th>
+                                            <th className="p-4 text-red-600 bg-red-50/50">Frist (Deadline)</th>
+                                            <th className="p-4">Status</th>
+                                            <th className="p-4">Handlinger</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-slate-100">
+                                        {processedTasks.map(task => (
+                                            <tr key={task.id} className="hover:bg-slate-50 transition-colors">
+                                                <td className="p-4 font-bold text-slate-800 border-r border-slate-100">{task.name}</td>
+                                                <td className="p-2 border-r border-slate-100 relative group/date cursor-pointer">
+                                                    <div className="absolute inset-0 flex items-center justify-center pointer-events-none opacity-0 group-hover/date:opacity-100 transition-opacity bg-slate-50/50">
+                                                        <Edit2 className="w-4 h-4 text-slate-400" />
+                                                    </div>
+                                                    <DatePickerWithWeek 
+                                                        selected={task.start_date ? new Date(task.start_date) : null}
+                                                        onChange={(date) => handleTaskInlineChange(task, 'start_date', date ? date.toISOString().split('T')[0] : null)}
+                                                        className="w-full bg-transparent border-none p-2 font-semibold text-slate-600 focus:ring-2 focus:ring-primary-500/50 rounded-lg cursor-pointer z-10 relative text-center"
+                                                        placeholderText="-"
+                                                    />
+                                                </td>
+                                                <td className="p-2 border-r border-slate-100 bg-primary-50/20 relative group/date cursor-pointer">
+                                                    <div className="absolute inset-0 flex items-center justify-center pointer-events-none opacity-0 group-hover/date:opacity-100 transition-opacity bg-primary-100/50">
+                                                        <Edit2 className="w-4 h-4 text-primary-400" />
+                                                    </div>
+                                                    <DatePickerWithWeek 
+                                                        selected={task.expected_end_date ? new Date(task.expected_end_date) : null}
+                                                        onChange={(date) => handleTaskInlineChange(task, 'expected_end_date', date ? date.toISOString().split('T')[0] : null)}
+                                                        className="w-full bg-transparent border-none p-2 font-bold text-primary-700 focus:ring-2 focus:ring-primary-500/50 rounded-lg cursor-pointer z-10 relative text-center"
+                                                        placeholderText="-"
+                                                    />
+                                                </td>
+                                                <td className="p-2 border-r border-slate-100 bg-red-50/20 relative group/date cursor-pointer">
+                                                    <div className="absolute inset-0 flex items-center justify-center pointer-events-none opacity-0 group-hover/date:opacity-100 transition-opacity bg-red-100/50">
+                                                        <Edit2 className="w-4 h-4 text-red-400" />
+                                                    </div>
+                                                    <DatePickerWithWeek 
+                                                        selected={task.deadline ? new Date(task.deadline) : null}
+                                                        onChange={(date) => handleTaskInlineChange(task, 'deadline', date ? date.toISOString().split('T')[0] : null)}
+                                                        className="w-full bg-transparent border-none p-2 font-bold text-red-600 focus:ring-2 focus:ring-red-500/50 rounded-lg cursor-pointer z-10 relative text-center"
+                                                        placeholderText="-"
+                                                    />
+                                                </td>
+                                                <td className="p-2 relative group/status">
+                                                    <div className="absolute inset-y-0 right-2 flex items-center pointer-events-none opacity-0 group-hover/status:opacity-100 transition-opacity z-20">
+                                                        <Edit2 className="w-3 h-3 text-slate-400" />
+                                                    </div>
+                                                    <select 
+                                                        value={task.status} 
+                                                        onChange={(e) => handleTaskInlineChange(task, 'status', e.target.value)}
+                                                        className={`w-full appearance-none outline-none cursor-pointer pl-3 pr-8 py-2 rounded-md text-xs font-bold uppercase border focus:ring-2 focus:ring-primary-500/50 relative z-10 ${task.status === 'completed' ? 'bg-green-50 text-green-700 border-green-200' : task.status === 'in_progress' ? 'bg-yellow-50 text-yellow-700 border-yellow-200' : 'bg-slate-50 text-slate-600 border-slate-200'}`}
+                                                    >
+                                                        <option value="planned">Planlagt</option>
+                                                        <option value="in_progress">Påbegynt</option>
+                                                        <option value="completed">Ferdig</option>
+                                                    </select>
+                                                </td>
+                                                <td className="p-4 flex gap-2">
+                                                    <button onClick={() => { setCurrentTask(task); setShowTaskModal(true); }} className="p-2 text-slate-400 hover:text-primary-600 hover:bg-primary-50 border border-transparent hover:border-primary-100 rounded-lg transition-all"><Edit2 className="w-4 h-4" /></button>
+                                                    <button onClick={() => handleDeleteTask(task.id)} className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 border border-transparent hover:border-red-100 rounded-lg transition-all"><Trash2 className="w-4 h-4" /></button>
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        )}
+                    </>
                 )}
             </div>
 
@@ -1380,12 +1534,11 @@ export default function Progress() {
                             <form onSubmit={handleAddPhoto} className="p-6 space-y-5">
                                 <div>
                                     <label className="block text-sm font-bold text-slate-700 mb-1">Dato</label>
-                                    <input
-                                        type="date"
-                                        required
-                                        value={newPhoto.date}
-                                        onChange={(e) => setNewPhoto({ ...newPhoto, date: e.target.value })}
+                                    <DatePickerWithWeek
+                                        selected={newPhoto.date ? new Date(newPhoto.date) : null}
+                                        onChange={(date) => setNewPhoto({ ...newPhoto, date: date ? date.toISOString().split('T')[0] : '' })}
                                         className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500 transition-all"
+                                        required
                                     />
                                 </div>
                                 <div>
@@ -1589,19 +1742,17 @@ export default function Progress() {
                             <div className="grid grid-cols-2 gap-3">
                                 <div>
                                     <label className="block text-xs font-bold text-slate-700 mb-1">Faktisk oppstart</label>
-                                    <input
-                                        type="date"
-                                        value={cellFormData.actualStart || ''}
-                                        onChange={(e) => setCellFormData({ ...cellFormData, actualStart: e.target.value })}
+                                    <DatePickerWithWeek
+                                        selected={cellFormData.actualStart ? new Date(cellFormData.actualStart) : null}
+                                        onChange={(date) => setCellFormData({ ...cellFormData, actualStart: date ? date.toISOString().split('T')[0] : '' })}
                                         className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-primary-500/50"
                                     />
                                 </div>
                                 <div>
                                     <label className="block text-xs font-bold text-slate-700 mb-1">Faktisk slutt</label>
-                                    <input
-                                        type="date"
-                                        value={cellFormData.actualEnd || ''}
-                                        onChange={(e) => setCellFormData({ ...cellFormData, actualEnd: e.target.value })}
+                                    <DatePickerWithWeek
+                                        selected={cellFormData.actualEnd ? new Date(cellFormData.actualEnd) : null}
+                                        onChange={(date) => setCellFormData({ ...cellFormData, actualEnd: date ? date.toISOString().split('T')[0] : '' })}
                                         className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-primary-500/50"
                                     />
                                 </div>
@@ -1781,15 +1932,30 @@ export default function Progress() {
                             </div>
                             <div>
                                 <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-1">Oppstartsdato</label>
-                                <input type="date" required value={currentTask.start_date || ''} onChange={e => setCurrentTask({...currentTask, start_date: e.target.value})} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 font-medium focus:ring-2 focus:ring-primary-500/50" />
+                                <DatePickerWithWeek 
+                                    selected={currentTask.start_date ? new Date(currentTask.start_date) : null}
+                                    onChange={date => setCurrentTask({...currentTask, start_date: date ? date.toISOString().split('T')[0] : null})}
+                                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 font-medium focus:ring-2 focus:ring-primary-500/50"
+                                    placeholderText="Velg oppstartsdato..."
+                                />
                             </div>
                             <div>
                                 <label className="block text-xs font-bold text-primary-700 uppercase tracking-widest mb-1">Forventet ferdigdato</label>
-                                <input type="date" value={currentTask.expected_end_date || ''} onChange={e => setCurrentTask({...currentTask, expected_end_date: e.target.value})} className="w-full bg-primary-50/50 border border-primary-200 text-primary-900 rounded-xl px-4 py-2.5 font-medium focus:ring-2 focus:ring-primary-500/50" />
+                                <DatePickerWithWeek 
+                                    selected={currentTask.expected_end_date ? new Date(currentTask.expected_end_date) : null}
+                                    onChange={date => setCurrentTask({...currentTask, expected_end_date: date ? date.toISOString().split('T')[0] : null})}
+                                    className="w-full bg-primary-50/50 border border-primary-200 text-primary-900 rounded-xl px-4 py-2.5 font-medium focus:ring-2 focus:ring-primary-500/50"
+                                    placeholderText="Velg forventet ferdig..."
+                                />
                             </div>
                             <div>
                                 <label className="block text-xs font-bold text-red-600 uppercase tracking-widest mb-1">Frist (Valgfri)</label>
-                                <input type="date" value={currentTask.deadline || ''} onChange={e => setCurrentTask({...currentTask, deadline: e.target.value})} className="w-full bg-red-50 text-red-900 border border-red-200 rounded-xl px-4 py-2.5 font-medium focus:ring-2 focus:ring-red-500/50" />
+                                <DatePickerWithWeek 
+                                    selected={currentTask.deadline ? new Date(currentTask.deadline) : null}
+                                    onChange={date => setCurrentTask({...currentTask, deadline: date ? date.toISOString().split('T')[0] : null})}
+                                    className="w-full bg-red-50 text-red-900 border border-red-200 rounded-xl px-4 py-2.5 font-medium focus:ring-2 focus:ring-red-500/50"
+                                    placeholderText="Velg frist..."
+                                />
                             </div>
                             <div>
                                 <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-1">Status</label>

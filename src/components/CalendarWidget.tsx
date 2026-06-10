@@ -7,11 +7,13 @@ import type { Event as BigCalendarEventType, EventProps } from 'react-big-calend
 import withDragAndDrop from 'react-big-calendar/lib/addons/dragAndDrop';
 // @ts-ignore
 import type { EventInteractionArgs } from 'react-big-calendar/lib/addons/dragAndDrop';
-import { format, parse, startOfWeek, getDay, addDays } from 'date-fns';
+import { format, parse, startOfWeek, getDay, addDays, getISOWeek } from 'date-fns';
 import { nb } from 'date-fns/locale';
 
 import 'react-big-calendar/lib/css/react-big-calendar.css';
 import 'react-big-calendar/lib/addons/dragAndDrop/styles.css';
+import DatePickerWithWeek from './DatePickerWithWeek';
+
 
 const locales = {
     'nb': nb,
@@ -384,6 +386,8 @@ export default function CalendarWidget() {
 
     const formats = {
         timeGutterFormat: 'HH:mm',
+        dayRangeHeaderFormat: ({ start, end }: any, culture: any, localizer: any) =>
+            `Uke ${getISOWeek(start)}: ` + localizer.format(start, 'd. MMM', culture) + ' - ' + localizer.format(end, 'd. MMM', culture),
         eventTimeRangeFormat: ({ start, end }: any, culture: any, localizer: any) =>
             localizer.format(start, 'HH:mm', culture) + ' - ' + localizer.format(end, 'HH:mm', culture),
         agendaTimeRangeFormat: ({ start, end }: any, culture: any, localizer: any) =>
@@ -549,12 +553,11 @@ export default function CalendarWidget() {
                             <div className="grid grid-cols-2 gap-4">
                                 <div>
                                     <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-1.5">Dato</label>
-                                    <input
-                                        type="date"
-                                        required
-                                        value={newEvent.date}
-                                        onChange={e => setNewEvent({ ...newEvent, date: e.target.value })}
+                                    <DatePickerWithWeek
+                                        selected={newEvent.date ? new Date(newEvent.date) : null}
+                                        onChange={date => setNewEvent({ ...newEvent, date: date ? format(date, 'yyyy-MM-dd') : '' })}
                                         className="w-full bg-slate-50 border border-slate-200 text-slate-900 text-sm rounded-xl focus:ring-2 focus:ring-[#4285F4]/20 focus:border-[#4285F4] block p-3 font-medium transition-all"
+                                        required
                                     />
                                 </div>
                                 <div>
@@ -640,12 +643,11 @@ export default function CalendarWidget() {
                             <div className="grid grid-cols-2 gap-4">
                                 <div>
                                     <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-1.5">Dato</label>
-                                    <input
-                                        type="date"
-                                        required
-                                        value={editEventParams.date}
-                                        onChange={e => setEditEventParams({ ...editEventParams, date: e.target.value })}
+                                    <DatePickerWithWeek
+                                        selected={editEventParams.date ? new Date(editEventParams.date) : null}
+                                        onChange={date => setEditEventParams({ ...editEventParams, date: date ? format(date, 'yyyy-MM-dd') : '' })}
                                         className="w-full bg-slate-50 border border-slate-200 text-slate-900 text-sm rounded-xl focus:ring-2 focus:ring-[#4285F4]/20 focus:border-[#4285F4] block p-3 font-medium transition-all"
+                                        required
                                     />
                                 </div>
                                 <div>

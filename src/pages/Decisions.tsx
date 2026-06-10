@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import { useSubcontractor } from '../contexts/SubcontractorContext';
 import { PenTool, Plus, X, Search, Building2, Calendar, FileText, ChevronLeft, ChevronRight, Upload, File as FileIcon, Edit3, Folder, FolderPlus, Trash2, ExternalLink } from 'lucide-react';
+import DatePickerWithWeek from '../components/DatePickerWithWeek';
 import PdfViewer from '../components/PdfViewer';
 
 interface DecisionLog {
@@ -381,7 +382,7 @@ export default function Decisions() {
                                                     </div>
                                                     <select value={filterAreaId} onChange={(e) => setFilterAreaId(e.target.value)} className="bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-xs font-medium focus:ring-1 focus:ring-primary-500/50 max-w-[100px]">
                                                         <option value="">Område</option>
-                                                        {areas.map(a => (<option key={a.id} value={a.id}>{a.building}</option>))}
+                                                        {areas.map(a => (<option key={a.id} value={a.id}>{a.building}{a.floor ? ` - ${a.floor}` : ''}{a.zone ? ` - ${a.zone}` : ''}</option>))}
                                                     </select>
                                                 </div>
                                             </div>
@@ -434,7 +435,7 @@ export default function Decisions() {
                                                                     {log.global_areas && (
                                                                         <div className="flex items-center text-xs font-semibold text-slate-500 bg-slate-50 px-3 py-2 rounded-xl mt-4 shrink-0 border border-slate-100 w-fit">
                                                                             <FileText className="w-3.5 h-3.5 mr-2 text-slate-400" />
-                                                                            <span className="truncate">{log.global_areas.building}</span>
+                                                                            <span className="truncate">{log.global_areas.building}{log.global_areas.floor ? ` - ${log.global_areas.floor}` : ''}{log.global_areas.zone ? ` - ${log.global_areas.zone}` : ''}</span>
                                                                         </div>
                                                                     )}
                                                                 </div>
@@ -484,7 +485,12 @@ export default function Decisions() {
                             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                                 <div>
                                     <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-1.5">Dato</label>
-                                    <input type="date" required value={logForm.date} onChange={(e) => setLogForm({ ...logForm, date: e.target.value })} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 font-medium focus:ring-2 focus:ring-primary-500/50" />
+                                    <DatePickerWithWeek
+                                        selected={logForm.date ? new Date(logForm.date) : null}
+                                        onChange={(date) => setLogForm({ ...logForm, date: date ? date.toISOString().split('T')[0] : '' })}
+                                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 font-medium focus:ring-2 focus:ring-primary-500/50"
+                                        required
+                                    />
                                 </div>
                                 <div>
                                     <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-1.5">Fag</label>
@@ -497,7 +503,7 @@ export default function Decisions() {
                                     <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-1.5">Område</label>
                                     <select value={logForm.area_id} onChange={(e) => setLogForm({ ...logForm, area_id: e.target.value })} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 font-medium focus:ring-2 focus:ring-primary-500/50">
                                         <option value="">(Generelt)</option>
-                                        {areas.map(a => <option key={a.id} value={a.id}>{a.building}</option>)}
+                                        {areas.map(a => <option key={a.id} value={a.id}>{a.building}{a.floor ? ` - ${a.floor}` : ''}{a.zone ? ` - ${a.zone}` : ''}</option>)}
                                     </select>
                                 </div>
                             </div>

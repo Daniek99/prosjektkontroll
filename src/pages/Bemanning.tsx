@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { useSubcontractor } from '../contexts/SubcontractorContext';
 import { supabase } from '../lib/supabase';
-import { Users, Plus, Minus, ClipboardList, ChevronLeft, ChevronRight, X, Clock, Edit2, Settings, Trash2, Check } from 'lucide-react';
+import { Users, Plus, X, Edit2, Trash2, ChevronLeft, ChevronRight, Clock, Settings, ClipboardList, Minus, Check } from 'lucide-react';
+import DatePickerWithWeek from '../components/DatePickerWithWeek';
 
 export default function Bemanning() {
     const { selectedSubcontractorId } = useSubcontractor();
@@ -677,15 +678,14 @@ export default function Bemanning() {
                         <form onSubmit={handleAddManpower} className="p-6 space-y-5 overflow-y-auto">
                             <div>
                                 <label className="block text-sm font-bold text-slate-700 mb-1">Dato</label>
-                                <input
-                                    type="date"
-                                    required
-                                    value={newManpower.date}
-                                    onChange={(e) => {
-                                        const newDate = e.target.value;
+                                <DatePickerWithWeek
+                                    selected={newManpower.date ? new Date(newManpower.date) : null}
+                                    onChange={(date) => {
+                                        const newDate = date ? date.toISOString().split('T')[0] : '';
                                         setNewManpower({ ...newManpower, date: newDate, /* hours_billable removed */ });
                                     }}
                                     className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500 transition-all"
+                                    required
                                 />
                             </div>
 

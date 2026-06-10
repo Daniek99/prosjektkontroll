@@ -16,6 +16,7 @@ import {
     Pencil,
     GripVertical
 } from 'lucide-react';
+import DatePickerWithWeek from './DatePickerWithWeek';
 
 interface Task {
     id: string;
@@ -493,10 +494,9 @@ export default function TodoList() {
                         <div className="space-y-4 pl-9">
                             <div className="flex items-center group">
                                 <Calendar className="w-5 h-5 text-slate-400 mr-3 group-hover:text-primary-500 transition-colors" />
-                                <input
-                                    type="date"
-                                    value={selectedTask.due_date || ''}
-                                    onChange={(e) => updateTaskDetails(selectedTask.id, { due_date: e.target.value || null as any })}
+                                <DatePickerWithWeek
+                                    selected={selectedTask.due_date ? new Date(selectedTask.due_date) : null}
+                                    onChange={(date) => updateTaskDetails(selectedTask.id, { due_date: date ? date.toISOString().split('T')[0] : null as any })}
                                     className="bg-transparent border-none text-sm font-medium text-slate-600 focus:ring-0 focus:outline-none px-0 cursor-pointer hover:bg-slate-50 py-1 rounded"
                                 />
                                 {selectedTask.due_date && (

@@ -5,8 +5,8 @@ import { Building2, Users, DollarSign, ChevronRight, AlertCircle, CalendarClock,
 import TodoList from '../components/TodoList';
 import SubcontractorTodoList from '../components/SubcontractorTodoList';
 import CalendarWidget from '../components/CalendarWidget';
+import DatePickerWithWeek from '../components/DatePickerWithWeek';
 import { Link } from 'react-router-dom';
-
 
 
 export default function Dashboard() {
@@ -380,17 +380,29 @@ export default function Dashboard() {
                             <div className="grid grid-cols-2 gap-4">
                                 <div>
                                     <label className="block text-sm font-bold text-slate-700 mb-1 flex items-center"><CalendarIcon className="w-3.5 h-3.5 mr-1 text-slate-400"/> Startdato</label>
-                                    <input type="date" value={newActivity.start_date} onChange={(e) => setNewActivity({ ...newActivity, start_date: e.target.value })} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm font-medium focus:ring-2 focus:ring-primary-500/50" />
+                                    <DatePickerWithWeek 
+                                        selected={newActivity.start_date ? new Date(newActivity.start_date) : null}
+                                        onChange={(date) => setNewActivity({ ...newActivity, start_date: date ? date.toISOString().split('T')[0] : '' })}
+                                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm font-medium focus:ring-2 focus:ring-primary-500/50" 
+                                    />
                                 </div>
                                 <div>
                                     <label className="block text-sm font-bold text-slate-700 mb-1 flex items-center"><CalendarIcon className="w-3.5 h-3.5 mr-1 text-slate-400"/> Forventet ferdig</label>
-                                    <input type="date" value={newActivity.expected_end_date} onChange={(e) => setNewActivity({ ...newActivity, expected_end_date: e.target.value })} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm font-medium focus:ring-2 focus:ring-primary-500/50" />
+                                    <DatePickerWithWeek 
+                                        selected={newActivity.expected_end_date ? new Date(newActivity.expected_end_date) : null}
+                                        onChange={(date) => setNewActivity({ ...newActivity, expected_end_date: date ? date.toISOString().split('T')[0] : '' })}
+                                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm font-medium focus:ring-2 focus:ring-primary-500/50" 
+                                    />
                                 </div>
                             </div>
 
                             <div className="pt-2 border-t border-slate-100">
                                 <label className="block text-sm font-bold text-slate-700 mb-1 flex items-center">Frist / Deadline (Valgfritt)</label>
-                                <input type="date" value={newActivity.deadline} onChange={(e) => setNewActivity({ ...newActivity, deadline: e.target.value })} className="w-full bg-white border border-red-200/60 rounded-xl px-4 py-2.5 font-medium text-red-900 focus:outline-none focus:ring-2 focus:ring-red-500/50 focus:border-red-500 transition-all" />
+                                <DatePickerWithWeek 
+                                    selected={newActivity.deadline ? new Date(newActivity.deadline) : null}
+                                    onChange={(date) => setNewActivity({ ...newActivity, deadline: date ? date.toISOString().split('T')[0] : '' })}
+                                    className="w-full bg-white border border-red-200/60 rounded-xl px-4 py-2.5 font-medium text-red-900 focus:outline-none focus:ring-2 focus:ring-red-500/50 focus:border-red-500 transition-all" 
+                                />
                                 <p className="text-xs text-slate-500 mt-1">Dette vil utløse rød markering på dashbordet om fristen passeres.</p>
                             </div>
 

@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { useSubcontractor } from '../contexts/SubcontractorContext';
 import { BookOpen, Plus, X, Calendar, Cloud, Sun, CloudRain, Snowflake, Pencil, Trash2 } from 'lucide-react';
+import DatePickerWithWeek from '../components/DatePickerWithWeek';
 
 interface DiaryEntry {
     id: string;
@@ -232,12 +233,11 @@ export default function Diary() {
                             <div className="grid grid-cols-2 gap-4">
                                 <div>
                                     <label className="block text-sm font-bold text-slate-700 mb-1">Dato</label>
-                                    <input
-                                        type="date"
-                                        required
-                                        value={newEntry.date}
-                                        onChange={(e) => setNewEntry({ ...newEntry, date: e.target.value })}
+                                    <DatePickerWithWeek
+                                        selected={newEntry.date ? new Date(newEntry.date) : null}
+                                        onChange={(date) => setNewEntry({ ...newEntry, date: date ? date.toISOString().split('T')[0] : '' })}
                                         className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 font-medium focus:ring-2 focus:ring-primary-500/50 text-slate-900"
+                                        required
                                     />
                                 </div>
                                 <div>
