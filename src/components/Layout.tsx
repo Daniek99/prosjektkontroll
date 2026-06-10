@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import {
     Menu, X, LayoutDashboard,
@@ -17,6 +17,8 @@ import {
     PenTool
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
+import { useSubcontractor } from '../contexts/SubcontractorContext';
+import { supabase } from '../lib/supabase';
 import SubcontractorSelector from './SubcontractorSelector';
 import GlobalSearch from './GlobalSearch';
 import { cn } from '../lib/utils';
@@ -41,6 +43,67 @@ export default function Layout() {
     const [showMobileMenu, setShowMobileMenu] = useState(false);
     const { signOut, user } = useAuth();
     const navigate = useNavigate();
+    const { selectedSubcontractorId } = useSubcontractor();
+    const [needsManpowerReminder, setNeedsManpowerReminder] = useState(false);
+
+    useEffect(() => {
+        if ('Notification' in window && Notification.permission === 'default') {
+            Notification.requestPermission();
+        }
+    }, []);
+
+    useEffect(() => {
+        if (!selectedSubcontractorId) {
+            setNeedsManpowerReminder(false);
+            return;
+        }
+
+        const checkManpower = async () => {
+            const now = new Date();
+            const todayStr = now.toLocaleDateString('sv-SE');
+            const isAfter14 = now.getHours() >= 14;
+
+            if (!isAfter14) {
+                setNeedsManpowerReminder(false);
+                return;
+            }
+
+            try {
+                const { data, error } = await supabase
+                    .from('daily_manpower')
+                    .select('id')
+                    .eq('subcontractor_id', selectedSubcontractorId)
+                    .eq('date', todayStr);
+
+                if (!error) {
+                    const missing = data.length === 0;
+                    setNeedsManpowerReminder(missing);
+
+                    // Desktop notification check
+                    if (missing && 'Notification' in window && Notification.permission === 'granted') {
+                        const notifiedKey = `gc-app-notified-manpower-${selectedSubcontractorId}-${todayStr}`;
+                        if (!localStorage.getItem(notifiedKey)) {
+                            const n = new Notification('Mangler bemanning', {
+                                body: 'Husk å loggføre bemanning for i dag! Fristen var kl. 14:00.',
+                            });
+                            n.onclick = () => {
+                                window.focus();
+                                navigate('/bemanning');
+                            };
+                            localStorage.setItem(notifiedKey, 'true');
+                        }
+                    }
+                } 
+            } catch (err) {
+                console.error(err);
+            }
+        };
+
+        checkManpower();
+        
+        const interval = setInterval(checkManpower, 60000);
+        return () => clearInterval(interval);
+    }, [selectedSubcontractorId, navigate]);
 
     const handleSignOut = async () => {
         await signOut();
@@ -64,7 +127,7 @@ export default function Layout() {
                             key={item.path}
                             to={item.path}
                             className={({ isActive }) => cn(
-                                "flex items-center px-3 py-2.5 text-sm font-medium rounded-lg transition-all duration-200",
+                                "flex items-center px-3 py-2.5 text-sm font-medium rounded-lg transition-all duration-200 relative group/nav",
                                 isActive
                                     ? "bg-slate-100 text-slate-900"
                                     : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"
@@ -72,9 +135,14 @@ export default function Layout() {
                         >
                             <item.icon className={cn(
                                 "w-5 h-5 mr-3 flex-shrink-0 transition-colors",
-                                // Active state handled by parent text color effectively, but standardizing
                             )} />
-                            {item.name}
+                            <span className="flex-1">{item.name}</span>
+                            {item.name === 'Bemanning' && needsManpowerReminder && (
+                                <span className="flex h-2 w-2 relative ml-2">
+                                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                                    <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500"></span>
+                                </span>
+                            )}
                         </NavLink>
                     ))}
                 </nav>
@@ -131,7 +199,13 @@ export default function Layout() {
                                     )}
                                 >
                                     <item.icon className={cn("w-5 h-5 mr-3 text-inherit")} />
-                                    {item.name}
+                                    <span className="flex-1">{item.name}</span>
+                                    {item.name === 'Bemanning' && needsManpowerReminder && (
+                                        <span className="flex h-2.5 w-2.5 relative ml-2">
+                                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                                            <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-red-500"></span>
+                                        </span>
+                                    )}
                                 </NavLink>
                             ))}
                         </nav>
