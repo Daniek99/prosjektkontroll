@@ -5,10 +5,11 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "start": "vite",
+    "start": "vite preview --host 0.0.0.0 --port ${PORT:-4173}",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview --host 0.0.0.0 --port ${PORT:-4173}",
+    "heroku-postbuild": "npm run build"
   },
   "dependencies": {
     "@react-oauth/google": "^0.13.4",
