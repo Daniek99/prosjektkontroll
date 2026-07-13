@@ -21,7 +21,10 @@ import Contacts from './pages/Contacts';
 import Statistics from './pages/Statistics';
 
 function App() {
-  const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID || '';
+  // Fallback is baked in so the production build works on Heroku without
+  // requiring VITE_GOOGLE_CLIENT_ID to be injected via `heroku config:set`.
+  const FALLBACK_GOOGLE_CLIENT_ID = '175309449361-namu4a3oqg9obknu1q70fji38bktanbl.apps.googleusercontent.com';
+  const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID || FALLBACK_GOOGLE_CLIENT_ID;
 
   return (
     <GoogleOAuthProvider clientId={googleClientId}>
