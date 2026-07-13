@@ -154,7 +154,7 @@ export default function Progress() {
     const [sortBy, setSortBy] = useState<'start_date' | 'expected_end_date' | 'deadline'>('start_date');
     const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
     const [prioritizeActive, setPrioritizeActive] = useState<boolean>(false);
-    const [hideCompleted, setHideCompleted] = useState<boolean>(false);
+    const [hideCompleted, setHideCompleted] = useState<boolean>(true);
     const [showTaskModal, setShowTaskModal] = useState(false);
     const [currentTask, setCurrentTask] = useState<Partial<ProgressTask>>({});
     const [showUploadPlanModal, setShowUploadPlanModal] = useState(false);

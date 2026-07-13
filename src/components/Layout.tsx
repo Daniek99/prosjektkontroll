@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Outlet, NavLink, useNavigate } from 'react-router-dom';
+import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom';
 import {
     Menu, X, LayoutDashboard,
     Settings,
@@ -19,8 +19,8 @@ import {
 import { useAuth } from '../contexts/AuthContext';
 import { useSubcontractor } from '../contexts/SubcontractorContext';
 import { supabase } from '../lib/supabase';
-import SubcontractorSelector from './SubcontractorSelector';
 import GlobalSearch from './GlobalSearch';
+import SubcontractorSelector from './SubcontractorSelector';
 import { cn } from '../lib/utils';
 
 const navItems = [
@@ -43,6 +43,8 @@ export default function Layout() {
     const [showMobileMenu, setShowMobileMenu] = useState(false);
     const { signOut, user } = useAuth();
     const navigate = useNavigate();
+    const location = useLocation();
+    const isDashboard = location.pathname === '/';
     const { selectedSubcontractorId } = useSubcontractor();
     const [needsManpowerReminder, setNeedsManpowerReminder] = useState(false);
 
@@ -237,14 +239,10 @@ export default function Layout() {
                         </div>
                         <span className="text-lg font-bold tracking-tight">Prosjektkontroll</span>
                     </div>
-
                     <div className="flex-1 flex justify-end md:justify-between items-center ml-4">
-                        <GlobalSearch />
-                        <div className="hidden md:flex items-center space-x-2 text-sm font-medium text-white/90">
-                            <SubcontractorSelector />
-                        </div>
-                        <div className="md:hidden flex items-center space-x-4">
-                            <SubcontractorSelector />
+                        <div className="flex items-center gap-3 justify-end w-full">
+                            {!isDashboard && <SubcontractorSelector />}
+                            <GlobalSearch />
                         </div>
                     </div>
                 </header>

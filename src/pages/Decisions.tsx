@@ -61,22 +61,17 @@ export default function Decisions() {
     const [folderForm, setFolderForm] = useState({ name: '', subcontractor_id: '' });
     const [fileForm, setFileForm] = useState<{ subcontractor_id: string; folder_id: string; file: File | null; }>({ subcontractor_id: '', folder_id: '', file: null });
 
-    useEffect(() => { fetchData(); }, [selectedSubcontractorId]);
+    useEffect(() => { fetchData(); }, []);
 
     const fetchData = async () => {
         setLoading(true);
         const { data: areasData } = await supabase.from('global_areas').select('*');
         if (areasData) setAreas(areasData);
 
-        let logQuery = supabase.from('decision_logs').select(`*, global_areas(building, floor, zone), subcontractors(company_name)`).order('date', { ascending: false });
-        let fileQuery = supabase.from('engineering_files').select('*').order('created_at', { ascending: false });
-        let folderQuery = supabase.from('engineering_folders').select('*').order('created_at', { ascending: true });
-
-        if (selectedSubcontractorId) {
-            logQuery = logQuery.eq('subcontractor_id', selectedSubcontractorId);
-            fileQuery = fileQuery.eq('subcontractor_id', selectedSubcontractorId);
-            folderQuery = folderQuery.eq('subcontractor_id', selectedSubcontractorId);
-        }
+        // Always fetch ALL data — Prosjektering is a global page, not per-subcontractor
+        const logQuery = supabase.from('decision_logs').select(`*, global_areas(building, floor, zone), subcontractors(company_name)`).order('date', { ascending: false });
+        const fileQuery = supabase.from('engineering_files').select('*').order('created_at', { ascending: false });
+        const folderQuery = supabase.from('engineering_folders').select('*').order('created_at', { ascending: true });
 
         const [logsRes, filesRes, foldersRes] = await Promise.all([logQuery, fileQuery, folderQuery]);
         if (logsRes.data) setLogs(logsRes.data as unknown as DecisionLog[]);
@@ -121,10 +116,21 @@ export default function Decisions() {
         e.preventDefault();
         if (!fileForm.file) return;
         setUploading(true);
-        const fileExt = fileForm.file.name.split('.').pop();
+        const fileExt = fileForm.file.name.split('.').pop()?.toLowerCase();
         const fileName = `${Math.random().toString(36).substring(2)}_${Date.now()}.${fileExt}`;
+        
+        // Explicitly set content type for Excel and other files that may have missing/incorrect MIME types
+        let contentType = fileForm.file.type;
+        if (!contentType || contentType === 'application/octet-stream') {
+            if (fileExt === 'xlsx') contentType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+            else if (fileExt === 'xls') contentType = 'application/vnd.ms-excel';
+            else if (fileExt === 'csv') contentType = 'text/csv';
+            else if (fileExt === 'docx') contentType = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+            else if (fileExt === 'pptx') contentType = 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
+        }
+        
         const { error: uploadError } = await supabase.storage.from('engineering').upload(fileName, fileForm.file, {
-            contentType: fileForm.file.type,
+            contentType,
             upsert: false
         });
 
@@ -552,9 +558,9 @@ export default function Decisions() {
                         </div>
                         <form onSubmit={handleUploadFile} className="p-6 space-y-5">
                             <div>
-                                <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-1.5">Gjelder Fag</label>
-                                <select required value={fileForm.subcontractor_id} onChange={(e) => setFileForm({ ...fileForm, subcontractor_id: e.target.value })} className="w-full bg-slate-50 border-slate-200 rounded-xl px-4 py-2.5 font-medium">
-                                    <option value="">Velg underentreprenør...</option>
+                                <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-1.5">Gjelder Fag (valgfritt)</label>
+                                <select value={fileForm.subcontractor_id} onChange={(e) => setFileForm({ ...fileForm, subcontractor_id: e.target.value })} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 font-medium">
+                                    <option value="">Generelt (alle fag)</option>
                                     {subcontractors.map(sub => <option key={sub.id} value={sub.id}>{sub.company_name}</option>)}
                                 </select>
                             </div>
@@ -609,6 +615,20 @@ export default function Decisions() {
                     <div className="flex-1 overflow-hidden bg-slate-100 flex justify-center items-center relative">
                         {previewFile.file_name.toLowerCase().endsWith('.pdf') || previewFile.file_url.toLowerCase().includes('.pdf') ? (
                             <PdfViewer url={previewFile.file_url} />
+                        ) : previewFile.file_name.toLowerCase().match(/\.(xlsx?|csv|docx?|pptx?|xls)$/) ? (
+                            <div className="flex flex-col items-center justify-center text-center p-8">
+                                <FileText className="w-16 h-16 text-slate-300 mb-4" />
+                                <p className="text-slate-600 font-bold text-lg mb-1">{previewFile.file_name}</p>
+                                <p className="text-slate-400 text-sm mb-6">Denne filtypen kan ikke forhåndsvises i nettleseren.</p>
+                                <a
+                                    href={previewFile.file_url}
+                                    download={previewFile.file_name}
+                                    className="px-6 py-3 bg-primary-600 text-white font-bold rounded-xl hover:bg-primary-700 transition-colors flex items-center gap-2"
+                                >
+                                    <ExternalLink className="w-4 h-4" />
+                                    Last ned fil
+                                </a>
+                            </div>
                         ) : (
                             <iframe
                                 src={previewFile.file_url}

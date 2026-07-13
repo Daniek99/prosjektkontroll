@@ -1,11 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef, Fragment } from 'react';
 import { useSubcontractor } from '../contexts/SubcontractorContext';
 import { supabase } from '../lib/supabase';
-import { Users, Plus, X, Edit2, Trash2, ChevronLeft, ChevronRight, Clock, Settings, ClipboardList, Minus, Check, Copy } from 'lucide-react';
+import { Users, Plus, X, Edit2, Trash2, ChevronLeft, ChevronRight, Clock, Settings, ClipboardList, Minus, Check, Copy, Repeat } from 'lucide-react';
 import DatePickerWithWeek from '../components/DatePickerWithWeek';
 
 export default function Bemanning() {
-    const { selectedSubcontractorId } = useSubcontractor();
+    const { selectedSubcontractorId, setSelectedSubcontractorId, subcontractors } = useSubcontractor();
     const [manpower, setManpower] = useState<any[]>([]);
     const [activities, setActivities] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
@@ -19,6 +19,53 @@ export default function Bemanning() {
     const [editActivityDesc, setEditActivityDesc] = useState('');
     const [editActivityChangeOrder, setEditActivityChangeOrder] = useState('');
     const [showQuickAddActivity, setShowQuickAddActivity] = useState(false);
+    const [hideCompletedActivities, setHideCompletedActivities] = useState(true);
+
+    // Drag & drop / Excel-like fill state for the calendar grids
+    const [dragSource, setDragSource] = useState<{ dateStr: string; logId: string } | null>(null);
+    const [isFilling, setIsFilling] = useState(false);
+    const [fillSource, setFillSource] = useState<any | null>(null);
+    const [fillTargets, setFillTargets] = useState<string[]>([]);
+    const manpowerRef = useRef<any[]>([]);
+    useEffect(() => { manpowerRef.current = manpower; }, [manpower]);
+
+    // ---- Multi-select subcontractors for the miniature overview ----
+    const [selectedSubIds, setSelectedSubIds] = useState<string[]>(() => selectedSubcontractorId ? [selectedSubcontractorId] : []);
+    const [manpowerBySub, setManpowerBySub] = useState<Record<string, any[]>>({});
+    const [showSubDropdown, setShowSubDropdown] = useState(false);
+    const [hoveredSubId, setHoveredSubId] = useState<string | null>(null);
+    const [expandedViewModes, setExpandedViewModes] = useState<Record<string, 'week' | 'month'>>({});
+
+    const refreshManpowerMulti = async () => {
+        if (selectedSubIds.length === 0) { setManpowerBySub({}); return; }
+        const { data } = await supabase
+            .from('daily_manpower')
+            .select(`*, daily_manpower_positions ( global_area_id )`)
+            .in('subcontractor_id', selectedSubIds)
+            .order('date', { ascending: false })
+            .limit(200);
+        if (data) {
+            const map: Record<string, any[]> = {};
+            selectedSubIds.forEach(id => { map[id] = []; });
+            data.forEach(d => { if (!map[d.subcontractor_id]) map[d.subcontractor_id] = []; map[d.subcontractor_id].push(d); });
+            setManpowerBySub(map);
+        }
+    };
+
+    useEffect(() => {
+        refreshManpowerMulti();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [selectedSubIds]);
+
+    // Sync the context's active subcontractor with the multi-selection
+    useEffect(() => {
+        if (selectedSubIds.length === 1) {
+            if (selectedSubcontractorId !== selectedSubIds[0]) setSelectedSubcontractorId(selectedSubIds[0]);
+        } else if (selectedSubIds.length === 0) {
+            if (selectedSubcontractorId !== null) setSelectedSubcontractorId(null);
+        }
+        // length > 1: leave context untouched so the miniature overview stays the focus
+    }, [selectedSubIds]);
 
     // Calendar State
     const [viewMode, setViewMode] = useState<'week' | 'month'>('week');
@@ -39,6 +86,7 @@ export default function Bemanning() {
         date: string;
         contract_workers: number | string;
         billable_workers: number | string;
+        total_workers_per_day?: number | string;
         notes: string;
         billable_comment: string;
         billable_activities: Array<{ activity_id: string, hours: string | number }>;
@@ -53,6 +101,7 @@ export default function Bemanning() {
         })(),
         contract_workers: '',
         billable_workers: '',
+        total_workers_per_day: '',
         notes: '',
         billable_comment: '',
         billable_activities: [],
@@ -60,6 +109,11 @@ export default function Bemanning() {
     });
 
     const [assignedAreas, setAssignedAreas] = useState<any[]>([]);
+
+    // Filter activities: hide completed by default
+    const filteredActivitiesForDropdown = hideCompletedActivities
+        ? activities.filter(a => a.status !== 'completed')
+        : activities;
 
     const resetForm = () => {
         const now = new Date();
@@ -72,6 +126,7 @@ export default function Bemanning() {
             date: dateStr,
             contract_workers: '',
             billable_workers: '',
+            total_workers_per_day: '',
             notes: '',
             billable_comment: '',
             billable_activities: [],
@@ -81,29 +136,163 @@ export default function Bemanning() {
 
     const handleCopyPreviousDay = () => {
         if (!newManpower.date) return;
-        
+
         const selectedTime = new Date(newManpower.date).getTime();
         const previousLog = manpower
             .filter((log: any) => new Date(log.date).getTime() < selectedTime)
             .sort((a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime())[0];
-            
+
         if (!previousLog) {
             alert('Ingen tidligere logg funnet å kopiere fra.');
             return;
         }
-        
+
         const positionIds = previousLog.daily_manpower_positions?.map((p: any) => p.global_area_id) || [];
-        
+
         setNewManpower({
             ...newManpower,
             contract_workers: previousLog.contract_workers ?? '',
             billable_workers: previousLog.billable_workers ?? '',
+            total_workers_per_day: previousLog.total_workers_per_day ?? '',
             notes: previousLog.notes || '',
             billable_comment: previousLog.billable_comment || previousLog.comment || '',
             billable_activities: previousLog.billable_activities || (previousLog.activity_id ? [{ activity_id: previousLog.activity_id, hours: previousLog.hours_billable }] : []),
             position_ids: positionIds
         });
     };
+
+    const handleCopyFromPreviousDay = (targetDateStr: string) => {
+        const targetDate = new Date(targetDateStr);
+        const previousDate = new Date(targetDate.getTime() - 24 * 60 * 60 * 1000);
+        const previousDateStr = `${previousDate.getFullYear()}-${String(previousDate.getMonth() + 1).padStart(2, '0')}-${String(previousDate.getDate()).padStart(2, '0')}`;
+
+        const previousLog = manpower.find((log: any) => log.date === previousDateStr);
+
+        if (!previousLog) {
+            alert('Ingen bemanning funnet for forrige dag.');
+            return null;
+        }
+
+        const positionIds = previousLog.daily_manpower_positions?.map((p: any) => p.global_area_id) || [];
+
+        const result = {
+            date: targetDateStr,
+            contract_workers: previousLog.contract_workers ?? '',
+            billable_workers: previousLog.billable_workers ?? '',
+            notes: previousLog.notes || '',
+            billable_comment: previousLog.billable_comment || previousLog.comment || '',
+            billable_activities: previousLog.billable_activities || (previousLog.activity_id ? [{ activity_id: previousLog.activity_id, hours: previousLog.hours_billable }] : []),
+            position_ids: positionIds
+        };
+
+        return result;
+    };
+
+    // Repeat entry: copy an existing day's data to the next day and open modal
+    const handleRepeatEntry = (sourceDateStr: string) => {
+        const sourceLog = manpower.find((log: any) => log.date === sourceDateStr);
+        if (!sourceLog) return;
+
+        const nextDate = new Date(sourceDateStr + 'T00:00:00');
+        nextDate.setDate(nextDate.getDate() + 1);
+        const nextDateStr = `${nextDate.getFullYear()}-${String(nextDate.getMonth() + 1).padStart(2, '0')}-${String(nextDate.getDate()).padStart(2, '0')}`;
+
+        const positionIds = sourceLog.daily_manpower_positions?.map((p: any) => p.global_area_id) || [];
+
+        setNewManpower({
+            date: nextDateStr,
+            contract_workers: sourceLog.contract_workers ?? '',
+            billable_workers: sourceLog.billable_workers ?? '',
+            total_workers_per_day: sourceLog.total_workers_per_day ?? '',
+            notes: sourceLog.notes || '',
+            billable_comment: sourceLog.billable_comment || sourceLog.comment || '',
+            billable_activities: sourceLog.billable_activities || (sourceLog.activity_id ? [{ activity_id: sourceLog.activity_id, hours: sourceLog.hours_billable }] : []),
+            position_ids: positionIds
+        });
+        setShowManpowerModal(true);
+    };
+
+    // ---- Drag & drop + Excel-like fill for the calendar grids ----
+    async function refreshManpower() {
+        if (!selectedSubcontractorId) return;
+        setLoading(true);
+        const { data: mData } = await supabase
+            .from('daily_manpower')
+            .select(`*, daily_manpower_positions ( global_area_id )`)
+            .eq('subcontractor_id', selectedSubcontractorId)
+            .order('date', { ascending: false })
+            .limit(100);
+        if (mData) setManpower(mData);
+        setLoading(false);
+    }
+
+    const moveManpower = async (sourceLogId: string, targetDateStr: string) => {
+        if (!selectedSubcontractorId) return;
+        const source = manpowerRef.current.find(m => m.id === sourceLogId);
+        if (!source || source.date === targetDateStr) return;
+        const { error } = await supabase.from('daily_manpower').update({ date: targetDateStr }).eq('id', sourceLogId);
+        if (!error) {
+            await refreshManpower();
+        } else {
+            alert('Kunne ikke flytte mannskapslogg.');
+        }
+    };
+
+    const startFill = (e: React.MouseEvent, sourceLog: any) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setFillSource(sourceLog);
+        setFillTargets([sourceLog.date]);
+        setIsFilling(true);
+    };
+
+    const extendFill = (dateStr: string) => {
+        if (!isFilling || !fillSource) return;
+        setFillTargets(prev => prev.includes(dateStr) ? prev : [...prev, dateStr]);
+    };
+
+    const finishFill = async () => {
+        if (!isFilling || !fillSource) {
+            setIsFilling(false); setFillSource(null); setFillTargets([]);
+            return;
+        }
+        const source = fillSource;
+        const targets = fillTargets.filter(d => d !== source.date);
+        setIsFilling(false);
+        setFillSource(null);
+        setFillTargets([]);
+        if (targets.length === 0) return;
+        for (const targetDate of targets) {
+            const existing = manpowerRef.current.find(m => m.date === targetDate);
+            const payload = {
+                subcontractor_id: selectedSubcontractorId,
+                date: targetDate,
+                workers_count: source.workers_count,
+                contract_workers: source.contract_workers || 0,
+                billable_workers: source.billable_workers || 0,
+                is_contract_work: Number(source.contract_workers) > 0,
+                notes: source.notes || '',
+                billable_comment: source.billable_comment || source.comment || '',
+                activity_id: null,
+                hours_contract: 0,
+                hours_billable: 0,
+                billable_activities: source.billable_activities || []
+            };
+            if (existing) {
+                await supabase.from('daily_manpower').update(payload).eq('id', existing.id);
+            } else {
+                await supabase.from('daily_manpower').insert([payload]);
+            }
+        }
+        await refreshManpower();
+    };
+
+    useEffect(() => {
+        const onUp = () => { if (isFilling) finishFill(); };
+        window.addEventListener('mouseup', onUp);
+        return () => window.removeEventListener('mouseup', onUp);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [isFilling, fillSource, fillTargets]);
 
     // Calculate default hours based on day of week
     const getDefaultHours = (dateStr: string, workers: number): number => {
@@ -116,25 +305,27 @@ export default function Bemanning() {
         return 0; // Weekend
     };
 
-    // Load activities when subcontractor changes
+    // Standalone loadActivities — reusable so we can refresh when the modal opens
+    const loadActivities = async () => {
+        if (!selectedSubcontractorId) return;
+        const { data: actData } = await supabase
+            .from('work_activities')
+            .select('*')
+            .eq('is_active', true)
+            .eq('subcontractor_id', selectedSubcontractorId)
+            .order('name', { ascending: true });
+
+        if (actData) setActivities(actData);
+    };
+
+    // Load activities & areas when subcontractor changes
     useEffect(() => {
         if (!selectedSubcontractorId) {
             setActivities([]);
             setAssignedAreas([]);
             return;
         }
-        
-        async function loadActivities() {
-            const { data: actData } = await supabase
-                .from('work_activities')
-                .select('*')
-                .eq('is_active', true)
-                .eq('subcontractor_id', selectedSubcontractorId)
-                .order('name', { ascending: true });
-            
-            if (actData) setActivities(actData);
-        }
-        
+
         async function loadAssignedAreas() {
             // Get areas assigned to this subcontractor
             const { data: areaData } = await supabase
@@ -150,7 +341,7 @@ export default function Bemanning() {
                     )
                 `)
                 .eq('subcontractor_id', selectedSubcontractorId);
-            
+
             if (areaData) {
                 const areas = areaData
                     .map((a: any) => a.global_areas)
@@ -163,10 +354,18 @@ export default function Bemanning() {
                 setAssignedAreas(areas);
             }
         }
-        
+
         loadActivities();
         loadAssignedAreas();
     }, [selectedSubcontractorId]);
+
+    // Refresh activities list whenever the manpower modal opens so
+    // activities added elsewhere (e.g. ActivityRegisterWidget) appear
+    useEffect(() => {
+        if (showManpowerModal) {
+            loadActivities();
+        }
+    }, [showManpowerModal]);
 
     // Add new activity
     const handleAddActivity = async () => {
@@ -174,11 +373,13 @@ export default function Bemanning() {
         
         const { data, error } = await supabase
             .from('work_activities')
-            .insert([{ 
-                name: newActivityName.trim(), 
+            .insert([{
+                name: newActivityName.trim(),
                 description: newActivityDesc.trim(),
                 change_order_number: newActivityChangeOrder.trim() || null,
-                subcontractor_id: selectedSubcontractorId 
+                subcontractor_id: selectedSubcontractorId,
+                is_active: true,
+                status: 'planned'
             }])
             .select();
         
@@ -232,26 +433,7 @@ export default function Bemanning() {
     };
 
     useEffect(() => {
-        if (!selectedSubcontractorId) return;
-
-        async function loadLogs() {
-            setLoading(true);
-            const { data: mData } = await supabase
-                .from('daily_manpower')
-                .select(`
-                    *,
-                    daily_manpower_positions (
-                        global_area_id
-                    )
-                `)
-                .eq('subcontractor_id', selectedSubcontractorId)
-                .order('date', { ascending: false })
-                .limit(100); // Increased limit to cover a month or more
-
-            if (mData) setManpower(mData);
-            setLoading(false);
-        }
-        loadLogs();
+        refreshManpower();
     }, [selectedSubcontractorId]);
 
     const handleAddManpower = async (e: React.FormEvent) => {
@@ -259,10 +441,12 @@ export default function Bemanning() {
         setLoading(true);
 
         const validActivities = newManpower.billable_activities.filter(act => act.activity_id);
+        const totalWorkers = Number(newManpower.total_workers_per_day) || 0;
+        // Allow logging 0 manpower (e.g. holidays, no-work days) — no guard.
         const payload: any = {
             subcontractor_id: selectedSubcontractorId,
             date: newManpower.date,
-            workers_count: (Number(newManpower.contract_workers) || 0) + (Number(newManpower.billable_workers) || 0),
+            workers_count: totalWorkers,
             contract_workers: Number(newManpower.contract_workers) || 0,
             billable_workers: Number(newManpower.billable_workers) || 0,
             is_contract_work: Number(newManpower.contract_workers) > 0,
@@ -313,6 +497,19 @@ export default function Bemanning() {
                 updatedManpower = [data[0], ...updatedManpower];
             }
             setManpower(updatedManpower.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()));
+            // Sync the miniature overview data for this subcontractor
+            if (selectedSubcontractorId) {
+                setManpowerBySub(prev => {
+                    const list = prev[selectedSubcontractorId] || [];
+                    let updatedMulti: any[];
+                    if (newManpower.id) {
+                        updatedMulti = list.map(m => m.id === newManpower.id ? data[0] : m);
+                    } else {
+                        updatedMulti = [data[0], ...list];
+                    }
+                    return { ...prev, [selectedSubcontractorId]: updatedMulti };
+                });
+            }
             setShowManpowerModal(false);
             resetForm();
         } else {
@@ -321,14 +518,14 @@ export default function Bemanning() {
         setLoading(false);
     };
 
-    if (!selectedSubcontractorId) {
+    if (selectedSubIds.length === 0) {
         return (
             <div className="flex flex-col items-center justify-center py-20 bg-white rounded-3xl border border-dashed border-slate-300">
                 <div className="bg-slate-50 p-6 rounded-full mb-6 ring-8 ring-slate-50/50">
                     <ClipboardList className="w-16 h-16 text-slate-300" />
                 </div>
-                <h3 className="text-xl font-extrabold text-slate-700">Ingen underentreprenør valgt</h3>
-                <p className="text-slate-500 text-center mt-3 font-medium">Vennligst velg en underentreprenør for å se byggeplasslogger.</p>
+                <h3 className="text-xl font-extrabold text-slate-700">Ingen underentreprenører valgt</h3>
+                <p className="text-slate-500 text-center mt-3 font-medium">Klikk "Velg UE" i toppen for å velge underentreprenører du vil vise mannskap for.</p>
             </div>
         );
     }
@@ -343,6 +540,86 @@ export default function Bemanning() {
     const hasLoggedToday = manpower.some(log => log.date === todayStr);
     const isPast14 = new Date().getHours() >= 14;
     const showReminder = isPast14 && !hasLoggedToday;
+
+    const renderExpandedView = (sub: any, subs: any[]) => {
+        const viewMode = expandedViewModes[sub.id] || 'week';
+        const setViewMode = (m: 'week' | 'month') => setExpandedViewModes(prev => ({ ...prev, [sub.id]: m }));
+        if (viewMode === 'week') {
+            return (
+                <div className="p-4 bg-slate-50/70 border-y border-primary-200">
+                    <div className="flex items-center justify-between mb-3">
+                        <h4 className="text-xs font-extrabold text-slate-700">{sub.company_name} — Uke {getWeekNumber(currentWeekStart)}</h4>
+                        <div className="flex items-center gap-2">
+                            <div className="flex gap-1">
+                                <button onClick={() => setViewMode('week')} className="px-2 py-1 text-[9px] font-bold rounded bg-primary-600 text-white">Uke</button>
+                                <button onClick={() => setViewMode('month')} className="px-2 py-1 text-[9px] font-bold rounded bg-white text-slate-500 border border-slate-200">Måned</button>
+                            </div>
+                            <button onClick={() => setHoveredSubId(null)} className="px-2 py-1 text-[9px] font-bold rounded bg-red-50 text-red-600 border border-red-200 hover:bg-red-100">Mindre</button>
+                        </div>
+                    </div>
+                    <div className="grid grid-cols-7 gap-2">
+                        {Array.from({ length: 7 }).map((_, i) => {
+                            const date = new Date(currentWeekStart.getTime() + i * 24 * 60 * 60 * 1000);
+                            const ds = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+                            const log = subs.find(l => l.date === ds);
+                            return (
+                                <div key={ds} className="bg-white rounded-lg p-2 border border-slate-200">
+                                    <div className="text-[9px] font-bold text-slate-400 uppercase">{date.toLocaleDateString('no-NO', { weekday: 'short' })}</div>
+                                    <div className="text-sm font-extrabold text-slate-700">{date.getDate()}</div>
+                                    <div className="text-lg font-black text-primary-600 mt-1">{log ? (log.workers_count || 0) : 0}</div>
+                                    {log?.notes && (
+                                        <div className="text-[9px] text-slate-500 mt-1 truncate" title={log.notes}>
+                                            📝 {log.notes}
+                                        </div>
+                                    )}
+                                </div>
+                            );
+                        })}
+                    </div>
+                </div>
+            );
+        }
+        // Month view
+        const firstDay = new Date(currentMonthStart.getFullYear(), currentMonthStart.getMonth(), 1);
+        const lastDay = new Date(currentMonthStart.getFullYear(), currentMonthStart.getMonth() + 1, 0);
+        let startDayOfWeek = firstDay.getDay() || 7;
+        const cells: (Date | null)[] = [];
+        for (let i = 1; i < startDayOfWeek; i++) cells.push(null);
+        for (let i = 1; i <= lastDay.getDate(); i++) cells.push(new Date(currentMonthStart.getFullYear(), currentMonthStart.getMonth(), i));
+        const remainder = cells.length % 7;
+        if (remainder !== 0) for (let i = remainder; i < 7; i++) cells.push(null);
+        return (
+            <div className="p-4 bg-slate-50/70 border-y border-primary-200">
+                <div className="flex items-center justify-between mb-3">
+                    <h4 className="text-xs font-extrabold text-slate-700">{sub.company_name} — {currentMonthStart.toLocaleDateString('no-NO', { month: 'long', year: 'numeric' })}</h4>
+                    <div className="flex items-center gap-2">
+                        <div className="flex gap-1">
+                            <button onClick={() => setViewMode('week')} className="px-2 py-1 text-[9px] font-bold rounded bg-white text-slate-500 border border-slate-200">Uke</button>
+                            <button onClick={() => setViewMode('month')} className="px-2 py-1 text-[9px] font-bold rounded bg-primary-600 text-white">Måned</button>
+                        </div>
+                        <button onClick={() => setHoveredSubId(null)} className="px-2 py-1 text-[9px] font-bold rounded bg-red-50 text-red-600 border border-red-200 hover:bg-red-100">Mindre</button>
+                    </div>
+                </div>
+                <div className="grid grid-cols-7 gap-1">
+                    {['Man','Tir','Ons','Tor','Fre','Lør','Søn'].map(d => (
+                        <div key={d} className="text-center text-[8px] font-bold text-slate-400 uppercase">{d}</div>
+                    ))}
+                    {cells.map((date, idx) => {
+                        if (!date) return <div key={`e-${idx}`} className="h-12" />;
+                        const ds = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+                        const log = subs.find(l => l.date === ds);
+                        const total = log ? (log.workers_count || 0) : 0;
+                        return (
+                            <div key={ds} className={`text-center py-1 rounded text-[9px] font-bold ${total > 0 ? 'bg-primary-100 text-primary-700' : 'bg-white text-slate-400'} border border-slate-100`}>
+                                <div>{date.getDate()}</div>
+                                <div>{total > 0 ? total : '–'}</div>
+                            </div>
+                        );
+                    })}
+                </div>
+            </div>
+        );
+    };
 
     return (
         <div className="space-y-6">
@@ -380,7 +657,42 @@ export default function Bemanning() {
                     <h1 className="text-2xl font-extrabold text-slate-900 tracking-tight">Bemanning</h1>
                     <p className="text-slate-500 font-medium text-sm mt-1">Daglig mannskapslogg og personell</p>
                 </div>
-                <div className="flex gap-3">
+                <div className="flex gap-3 flex-wrap">
+                    <div className="relative">
+                        <button onClick={() => setShowSubDropdown(!showSubDropdown)} className="bg-slate-100 text-slate-700 px-4 py-2.5 rounded-xl font-bold text-sm hover:bg-slate-200 transition-colors flex items-center shrink-0">
+                            <Users className="w-4 h-4 mr-2" />
+                            Velg UE ({selectedSubIds.length})
+                        </button>
+                        {showSubDropdown && (
+                            <>
+                                <div className="fixed inset-0 z-40" onClick={() => setShowSubDropdown(false)} />
+                                <div className="absolute right-0 mt-2 w-80 bg-white rounded-2xl shadow-xl border border-slate-200 z-50 max-h-96 overflow-hidden flex flex-col">
+                                    <div className="px-4 py-3 border-b border-slate-100 bg-slate-50 flex items-center justify-between">
+                                        <span className="text-xs font-bold text-slate-600 uppercase tracking-widest">Underentreprenører</span>
+                                        <div className="flex gap-2">
+                                            <button onClick={() => setSelectedSubIds(subcontractors.map(s => s.id))} className="text-[10px] font-bold text-primary-600 hover:text-primary-700">Velg alle</button>
+                                            <button onClick={() => setSelectedSubIds([])} className="text-[10px] font-bold text-red-500 hover:text-red-600">Fjern alle</button>
+                                        </div>
+                                    </div>
+                                    <div className="overflow-y-auto flex-1 p-2">
+                                        {[...subcontractors].sort((a, b) => {
+                                            const aP = a.type === 'project' ? 1 : 0, bP = b.type === 'project' ? 1 : 0;
+                                            if (aP !== bP) return aP - bP;
+                                            return a.company_name.localeCompare(b.company_name, 'no');
+                                        }).map(s => (
+                                            <label key={s.id} className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-slate-50 cursor-pointer">
+                                                <input type="checkbox" checked={selectedSubIds.includes(s.id)} onChange={() => {
+                                                    setSelectedSubIds(prev => prev.includes(s.id) ? prev.filter(id => id !== s.id) : [...prev, s.id]);
+                                                }} className="w-3.5 h-3.5 text-primary-600 border-slate-300 rounded focus:ring-primary-500" />
+                                                <span className="text-xs font-bold text-slate-700 truncate flex-1">{s.company_name}</span>
+                                                {s.type === 'project' && <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-extrabold bg-purple-100 text-purple-700 border border-purple-200 shrink-0">Prosjekt</span>}
+                                            </label>
+                                        ))}
+                                    </div>
+                                </div>
+                            </>
+                        )}
+                    </div>
                     <button onClick={() => setShowActivityModal(true)} className="bg-slate-100 text-slate-700 px-4 py-2.5 rounded-xl font-bold text-sm hover:bg-slate-200 transition-colors flex items-center shrink-0">
                         <Settings className="w-4 h-4 mr-2" />
                         Administrer Aktiviteter
@@ -392,344 +704,110 @@ export default function Bemanning() {
                 </div>
             </div>
 
-            <div>
-                {/* Manpower Weekly Calendar */}
-                <div className="bg-white border border-slate-200/60 rounded-3xl shadow-sm flex flex-col h-[500px]">
-                    <div className="px-6 py-5 border-b border-slate-200/60 bg-slate-50/50 flex justify-between items-center rounded-t-3xl">
+            {/* Mannskapsoversikt — global overview of all selected subcontractors (at the top) */}
+            {selectedSubIds.length > 0 && (
+                <div className="bg-white border border-slate-200/60 rounded-3xl shadow-sm p-4 md:p-6">
+                    <div className="flex items-center justify-between mb-4">
                         <h3 className="font-extrabold text-slate-800 flex items-center">
                             <Users className="w-5 h-5 mr-2 text-primary-500" />
-                            Daglig Mannskap
+                            Mannskapsoversikt ({selectedSubIds.length})
                         </h3>
-                        <div className="flex items-center space-x-4">
-                            <div className="flex bg-slate-200/50 p-1 rounded-lg">
-                                <button
-                                    onClick={() => setViewMode('week')}
-                                    className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all ${viewMode === 'week' ? 'bg-white shadow-sm text-slate-800' : 'text-slate-500 hover:text-slate-700'}`}
-                                >
-                                    Uke
-                                </button>
-                                <button
-                                    onClick={() => setViewMode('month')}
-                                    className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all ${viewMode === 'month' ? 'bg-white shadow-sm text-slate-800' : 'text-slate-500 hover:text-slate-700'}`}
-                                >
-                                    Måned
-                                </button>
-                            </div>
-
-                            {viewMode === 'week' ? (
-                                <div className="flex items-center space-x-2">
-                                    <button onClick={() => setCurrentWeekStart(new Date(currentWeekStart.getTime() - 7 * 24 * 60 * 60 * 1000))} className="p-1 text-slate-400 hover:text-primary-600 hover:bg-primary-50 rounded-lg transition-colors">
-                                        <ChevronLeft className="w-5 h-5" />
-                                    </button>
-                                    <span className="text-xs font-bold text-slate-600 uppercase tracking-widest min-w-[70px] text-center">
-                                        Uke {getWeekNumber(currentWeekStart)}
-                                    </span>
-                                    <button onClick={() => setCurrentWeekStart(new Date(currentWeekStart.getTime() + 7 * 24 * 60 * 60 * 1000))} className="p-1 text-slate-400 hover:text-primary-600 hover:bg-primary-50 rounded-lg transition-colors">
-                                        <ChevronRight className="w-5 h-5" />
-                                    </button>
-                                </div>
-                            ) : (
-                                <div className="flex items-center space-x-2">
-                                    <button onClick={() => setCurrentMonthStart(new Date(currentMonthStart.getFullYear(), currentMonthStart.getMonth() - 1, 1))} className="p-1 text-slate-400 hover:text-primary-600 hover:bg-primary-50 rounded-lg transition-colors">
-                                        <ChevronLeft className="w-5 h-5" />
-                                    </button>
-                                    <span className="text-xs font-bold text-slate-600 uppercase tracking-widest min-w-[100px] text-center">
-                                        {currentMonthStart.toLocaleDateString('no-NO', { month: 'long', year: 'numeric' })}
-                                    </span>
-                                    <button onClick={() => setCurrentMonthStart(new Date(currentMonthStart.getFullYear(), currentMonthStart.getMonth() + 1, 1))} className="p-1 text-slate-400 hover:text-primary-600 hover:bg-primary-50 rounded-lg transition-colors">
-                                        <ChevronRight className="w-5 h-5" />
-                                    </button>
-                                </div>
-                            )}
+                        <div className="flex items-center gap-2">
+                            <button onClick={() => setCurrentWeekStart(new Date(currentWeekStart.getTime() - 7 * 24 * 60 * 60 * 1000))} className="p-1 text-slate-400 hover:text-primary-600 hover:bg-primary-50 rounded-lg transition-colors">
+                                <ChevronLeft className="w-4 h-4" />
+                            </button>
+                            <span className="text-[10px] font-bold text-slate-600 uppercase tracking-widest min-w-[60px] text-center">Uke {getWeekNumber(currentWeekStart)}</span>
+                            <button onClick={() => setCurrentWeekStart(new Date(currentWeekStart.getTime() + 7 * 24 * 60 * 60 * 1000))} className="p-1 text-slate-400 hover:text-primary-600 hover:bg-primary-50 rounded-lg transition-colors">
+                                <ChevronRight className="w-4 h-4" />
+                            </button>
                         </div>
                     </div>
-                    <div className="flex-1 overflow-auto p-4 md:p-6 bg-slate-50/30">
-                        {loading ? (
-                            <div className="flex justify-center p-8"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"></div></div>
-                        ) : viewMode === 'week' ? (
-                            <div className="grid grid-cols-7 gap-2 h-full">
-                                {Array.from({ length: 7 }).map((_, i) => {
-                                    const date = new Date(currentWeekStart.getTime() + i * 24 * 60 * 60 * 1000);
-                                    const year = date.getFullYear();
-                                    const month = String(date.getMonth() + 1).padStart(2, '0');
-                                    const day = String(date.getDate()).padStart(2, '0');
-                                    const dateStr = `${year}-${month}-${day}`;
-                                    const logsForDay = manpower.filter(m => m.date === dateStr);
-                                    const totalWorkers = logsForDay.reduce((sum, log) => sum + log.workers_count, 0);
-                                    const today = new Date();
-                                    const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
-                                    const isToday = todayStr === dateStr;
-
+                    <div className="overflow-x-auto">
+                        <table className="w-full">
+                            <thead>
+                                <tr className="border-b border-slate-200">
+                                    <th className="text-left py-2 pr-3 text-[10px] font-bold text-slate-500 uppercase tracking-widest w-[200px]">Underentreprenør</th>
+                                    {Array.from({ length: 7 }).map((_, i) => {
+                                        const date = new Date(currentWeekStart.getTime() + i * 24 * 60 * 60 * 1000);
+                                        return (
+                                            <th key={i} className="text-center py-2 px-1 text-[10px] font-bold text-slate-500 uppercase tracking-widest">
+                                                <div className="text-[9px] text-slate-400 font-bold">{date.toLocaleDateString('no-NO', { weekday: 'short' })}</div>
+                                                <div className="text-sm font-extrabold text-slate-700 mt-0.5">{date.getDate()}</div>
+                                            </th>
+                                        );
+                                    })}
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {[...subcontractors].filter(s => selectedSubIds.includes(s.id)).sort((a, b) => {
+                                    const aP = a.type === 'project' ? 1 : 0, bP = b.type === 'project' ? 1 : 0;
+                                    if (aP !== bP) return aP - bP;
+                                    return a.company_name.localeCompare(b.company_name, 'no');
+                                }).map(sub => {
+                                    const subs = manpowerBySub[sub.id] || [];
                                     return (
-                                        <div
-                                            key={dateStr}
-                                            onClick={() => {
-                                                if (logsForDay.length > 0) {
-                                                    const log = logsForDay[0];
-                                                    const positionIds = log.daily_manpower_positions?.map((p: any) => p.global_area_id) || [];
-                                                    setNewManpower({
-                                                        id: log.id,
-                                                        date: log.date,
-                                                        contract_workers: log.contract_workers ?? '',
-                                                        billable_workers: log.billable_workers ?? '',
-                                                        notes: log.notes || '',
-                                                        billable_comment: log.billable_comment || log.comment || '',
-                                                        billable_activities: log.billable_activities || (log.activity_id ? [{ activity_id: log.activity_id, hours: log.hours_billable }] : []),
-                                                        position_ids: positionIds
-                                                    });
-                                                } else {
-                                                    setNewManpower({
-                                                        date: dateStr,
-                                                        contract_workers: '',
-                                                        billable_workers: '',
-                                                        notes: '',
-                                                        billable_comment: '',
-                                                        billable_activities: [],
-                                                        position_ids: []
-                                                    });
-                                                }
-                                                setShowManpowerModal(true);
-                                            }}
-                                            className={`flex flex-col h-full rounded-2xl border cursor-pointer ${isToday ? 'border-primary-400 bg-primary-50/20 shadow-sm ring-1 ring-primary-400/20' : 'border-slate-200 bg-white'} overflow-hidden transition-all hover:border-primary-400 hover:shadow-md hover:-translate-y-0.5`}
-                                        >
-                                            <div className={`py-2 text-center border-b ${isToday ? 'bg-primary-100/50 border-primary-200' : 'bg-slate-50 border-slate-100'} group-hover:bg-primary-50 transition-colors`}>
-                                                <div className="text-[10px] font-bold uppercase tracking-widest text-slate-400 group-hover:text-primary-500">
-                                                    {date.toLocaleDateString('no-NO', { weekday: 'short' })}
-                                                </div>
-                                                <div className={`text-lg font-extrabold ${isToday ? 'text-primary-700' : 'text-slate-700'}`}>
-                                                    {date.getDate()}
-                                                </div>
-                                            </div>
-                                            <div className="flex-1 flex flex-col items-center justify-center p-2 relative group">
-                                                {totalWorkers > 0 ? (
-                                                    <div className="flex flex-col items-center group-hover:scale-110 transition-transform w-full px-1">
-                                                        <span className="text-2xl font-extrabold text-slate-800">{String((logsForDay[0].contract_workers || 0) + (logsForDay[0].billable_workers || 0))}</span>
-                                                        <div className="flex w-full justify-between text-[9px] uppercase tracking-widest font-bold mt-1">
-                                                            <span className="text-primary-600 bg-primary-50 px-1 rounded" title="Kontraktsarbeidere">{logsForDay[0].contract_workers || 0} K</span>
-                                                            <span className="text-amber-600 bg-amber-50 px-1 rounded" title="Regningsarbeidere">{logsForDay[0].billable_workers || 0} R</span>
-                                                        </div>
+                                        <Fragment key={sub.id}>
+                                            <tr
+                                                className={`border-b border-slate-100 transition-colors ${sub.type === 'project' ? 'bg-purple-50/30' : ''} hover:bg-primary-50/40`}
+                                            >
+                                                <td className="py-2 pr-3">
+                                                    <div className="flex items-center gap-2">
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => setHoveredSubId(hoveredSubId === sub.id ? null : sub.id)}
+                                                            className="px-2 py-1 text-[9px] font-bold rounded bg-slate-100 text-slate-600 hover:bg-primary-100 hover:text-primary-700 transition-colors"
+                                                        >
+                                                            {hoveredSubId === sub.id ? 'Mindre' : 'Vis'}
+                                                        </button>
+                                                        <span className="text-xs font-bold text-slate-800 truncate">{sub.company_name}</span>
+                                                        {sub.type === 'project' && <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-extrabold bg-purple-100 text-purple-700 border border-purple-200 shrink-0">Prosjekt</span>}
                                                     </div>
-                                                ) : (
-                                                    <span className="text-slate-300 font-medium text-sm group-hover:text-primary-400 transition-colors"><Plus className="w-5 h-5 opacity-0 group-hover:opacity-100 transition-opacity absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-primary-500" />-</span>
-                                                )}
-
-                                                {logsForDay.some(l => l.notes) && (
-                                                    <div className="absolute inset-x-2 py-1.5 px-2 bg-slate-800 text-white text-[10px] rounded-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none -translate-y-2 group-hover:-translate-y-3 z-10 bottom-full truncate line-clamp-3">
-                                                        {logsForDay.filter(l => l.notes).map(l => l.notes).join(' | ')}
-                                                    </div>
-                                                )}
-                                            </div>
-                                        </div>
+                                                </td>
+                                                {Array.from({ length: 7 }).map((_, i) => {
+                                                    const date = new Date(currentWeekStart.getTime() + i * 24 * 60 * 60 * 1000);
+                                                    const ds = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+                                                    const log = subs.find(l => l.date === ds);
+                                                    const total = log ? (log.workers_count || 0) : 0;
+                                                    return (
+                                                        <td key={i} className="text-center py-2 px-1">
+                                                            <button type="button" onClick={() => {
+                                                                setSelectedSubcontractorId(sub.id);
+                                                                setNewManpower({
+                                                                    id: log?.id,
+                                                                    date: ds,
+                                                                    contract_workers: log?.contract_workers ?? '',
+                                                                    billable_workers: log?.billable_workers ?? '',
+                                                                    total_workers_per_day: log?.workers_count ?? '',
+                                                                    notes: log?.notes || '',
+                                                                    billable_comment: log?.billable_comment || log?.comment || '',
+                                                                    billable_activities: log?.billable_activities || (log?.activity_id ? [{ activity_id: log.activity_id, hours: log.hours_billable }] : []),
+                                                                    position_ids: log?.daily_manpower_positions?.map((p: any) => p.global_area_id) || []
+                                                                });
+                                                                setShowManpowerModal(true);
+                                                            }} className={`w-full py-1.5 rounded-md text-[10px] font-bold ${total > 0 ? 'bg-primary-100 text-primary-700 hover:bg-primary-200' : 'bg-slate-50 text-slate-400 hover:bg-slate-100'}`}>
+                                                                {total > 0 ? total : '–'}
+                                                            </button>
+                                                        </td>
+                                                    );
+                                                })}
+                                            </tr>
+                                            {hoveredSubId === sub.id && (
+                                                <tr>
+                                                    <td colSpan={8} className="p-0">
+                                                        {renderExpandedView(sub, subs)}
+                                                    </td>
+                                                </tr>
+                                            )}
+                                        </Fragment>
                                     );
                                 })}
-                            </div>
-                        ) : (
-                            <div className="flex flex-col h-full">
-                                <div className="grid grid-cols-7 gap-1 mb-2">
-                                    {['Man', 'Tir', 'Ons', 'Tor', 'Fre', 'Lør', 'Søn'].map(day => (
-                                        <div key={day} className="text-center text-[10px] font-bold uppercase tracking-widest text-slate-400">{day}</div>
-                                    ))}
-                                </div>
-                                <div className="grid grid-cols-7 grid-rows-5 gap-1 flex-1">
-                                    {(() => {
-                                        const cells = [];
-                                        const firstDay = new Date(currentMonthStart.getFullYear(), currentMonthStart.getMonth(), 1);
-                                        const lastDay = new Date(currentMonthStart.getFullYear(), currentMonthStart.getMonth() + 1, 0);
-                                        let startDayOfWeek = firstDay.getDay() || 7;
-                                        for (let i = 1; i < startDayOfWeek; i++) {
-                                            cells.push(null);
-                                        }
-                                        for (let i = 1; i <= lastDay.getDate(); i++) {
-                                            cells.push(new Date(currentMonthStart.getFullYear(), currentMonthStart.getMonth(), i));
-                                        }
-                                        const remainder = cells.length % 7;
-                                        if (remainder !== 0) {
-                                            for (let i = remainder; i < 7; i++) {
-                                                cells.push(null);
-                                            }
-                                        }
-
-                                        return cells.map((date, idx) => {
-                                            if (!date) return <div key={`empty-${idx}`} className="bg-slate-100/50 rounded-xl border border-transparent"></div>;
-
-                                            const year = date.getFullYear();
-                                            const month = String(date.getMonth() + 1).padStart(2, '0');
-                                            const day = String(date.getDate()).padStart(2, '0');
-                                            const dateStr = `${year}-${month}-${day}`;
-                                            const logsForDay = manpower.filter(m => m.date === dateStr);
-                                            const totalWorkers = logsForDay.reduce((sum, log) => sum + log.workers_count, 0);
-                                            const today = new Date();
-                                            const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
-                                            const isToday = todayStr === dateStr;
-
-                                            return (
-                                                <div
-                                                    key={dateStr}
-                                            onClick={() => {
-                                                if (logsForDay.length > 0) {
-                                                    const log = logsForDay[0];
-                                                    const positionIds = log.daily_manpower_positions?.map((p: any) => p.global_area_id) || [];
-                                                    setNewManpower({
-                                                        id: log.id,
-                                                        date: log.date,
-                                                        contract_workers: log.contract_workers ?? '',
-                                                        billable_workers: log.billable_workers ?? '',
-                                                        notes: log.notes || '',
-                                                        billable_comment: log.billable_comment || log.comment || '',
-                                                        billable_activities: log.billable_activities || (log.activity_id ? [{ activity_id: log.activity_id, hours: log.hours_billable }] : []),
-                                                        position_ids: positionIds
-                                                    });
-                                                } else {
-                                                    setNewManpower({
-                                                        date: dateStr,
-                                                        contract_workers: '',
-                                                        billable_workers: '',
-                                                        notes: '',
-                                                        billable_comment: '',
-                                                        billable_activities: [],
-                                                        position_ids: []
-                                                    });
-                                                }
-                                                setShowManpowerModal(true);
-                                            }}
-                                                    className={`flex flex-col p-1.5 sm:p-2 rounded-xl border cursor-pointer ${isToday ? 'border-primary-400 bg-primary-50/20 shadow-sm ring-1 ring-primary-400/20' : 'border-slate-200 bg-white'} overflow-hidden transition-all hover:border-primary-400 hover:shadow-md relative group min-h-[60px]`}
-                                                >
-                                                    <span className={`text-xs font-bold leading-none ${isToday ? 'text-primary-700' : 'text-slate-500'}`}>
-                                                        {date.getDate()}
-                                                    </span>
-                                                    <div className="flex-1 flex flex-col items-center justify-center mt-1">
-                                                        {totalWorkers > 0 ? (
-                                                            <div className="flex flex-col items-center">
-                                                                <span className="text-lg sm:text-xl font-extrabold text-slate-800 leading-none">{String((logsForDay[0].contract_workers || 0) + (logsForDay[0].billable_workers || 0))}</span>
-                                                            </div>
-                                                        ) : (
-                                                            <span className="text-slate-300 font-medium text-xs group-hover:text-primary-400 transition-colors"><Plus className="w-4 h-4 opacity-0 group-hover:opacity-100 transition-opacity absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-primary-500" /></span>
-                                                        )}
-                                                    </div>
-                                                </div>
-                                            );
-                                        });
-                                    })()}
-                                </div>
-                            </div>
-                        )}
+                            </tbody>
+                        </table>
                     </div>
                 </div>
+            )}
 
-                {/* Recent Logs List */}
-                <div className="bg-white border border-slate-200/60 rounded-3xl shadow-sm flex flex-col h-[500px]">
-                    <div className="px-6 py-5 border-b border-slate-200/60 bg-slate-50/50 flex justify-between items-center rounded-t-3xl">
-                        <h3 className="font-extrabold text-slate-800 flex items-center">
-                            <Clock className="w-5 h-5 mr-2 text-slate-500" />
-                            Siste registreringer
-                        </h3>
-                    </div>
-                    <div className="flex-1 overflow-auto p-4 md:p-6 space-y-3">
-                        {manpower.length === 0 ? (
-                            <div className="text-center p-8 text-slate-500 font-medium">Ingen logger funnet.</div>
-                        ) : (
-                            manpower.map((log) => {
-                                const activity = activities.find(a => a.id === log.activity_id);
-                                return (
-                                <div key={log.id} className="p-4 rounded-2xl border border-slate-200 bg-white hover:border-slate-300 transition-all flex justify-between items-start gap-4">
-                                    <div className="flex-1">
-                                        <div className="flex items-center gap-3 mb-1">
-                                            <span className="font-extrabold text-slate-900">{new Date(log.date).toLocaleDateString('no-NO')}</span>
-                                            {log.billable_activities?.length > 1 ? (
-                                                <span className="px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-widest bg-primary-100 text-primary-700">
-                                                    Flere Aktiviteter
-                                                </span>
-                                            ) : activity ? (
-                                                <span className="px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-widest bg-primary-100 text-primary-700">
-                                                    {activity.name}
-                                                </span>
-                                            ) : null}
-                                            <span className="px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-widest bg-slate-100 text-slate-600">
-                                                Totalt {(log.contract_workers || 0) + (log.billable_workers || 0)}
-                                            </span>
-                                        </div>
-                                        <div className="flex items-center gap-4 text-sm text-slate-700 mb-2">
-                                            <div className="flex items-center">
-                                                <div className="w-2 h-2 rounded-full bg-primary-500 mr-2"></div>
-                                                <span className="font-bold mr-1">{log.contract_workers || 0}</span> Kontrakt
-                                            </div>
-                                            <div className="flex items-center">
-                                                <div className="w-2 h-2 rounded-full bg-amber-500 mr-2"></div>
-                                                <span className="font-bold mr-1">{log.billable_workers || 0}</span> Regning
-                                            </div>
-                                        </div>
-                                        {(log.billable_activities && log.billable_activities.length > 0) ? (
-                                            <div className="mb-2 space-y-1">
-                                                {log.billable_activities.map((act: any, i: number) => {
-                                                    const actDetails = activities.find((a: any) => a.id === act.activity_id);
-                                                    return (
-                                                        <div key={i} className="flex items-center gap-2 text-sm text-slate-600">
-                                                            <Clock className="w-3 h-3 text-amber-500" />
-                                                            <span className="font-bold text-amber-700">{act.hours}t</span>
-                                                            {actDetails ? (
-                                                                <span className="px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-widest bg-primary-50 text-primary-700 border border-primary-100">
-                                                                    {actDetails.name} {actDetails.change_order_number ? `(${actDetails.change_order_number})` : ''}
-                                                                </span>
-                                                            ) : (
-                                                                <span className="px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-widest bg-slate-100 text-slate-600">
-                                                                    Ukjent aktivitet
-                                                                </span>
-                                                            )}
-                                                        </div>
-                                                    )
-                                                })}
-                                            </div>
-                                        ) : (
-                                            log.hours_billable > 0 && (
-                                                <div className="flex items-center gap-4 text-sm text-slate-600 mb-2">
-                                                    <div className="flex items-center">
-                                                        <Clock className="w-3 h-3 mr-1 text-amber-500" />
-                                                        <span className="font-bold mr-1">{log.hours_billable || 0}</span> regningstimer
-                                                    </div>
-                                                    {log.activity_id && activities.find(a => a.id === log.activity_id) && (
-                                                        <span className="px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-widest bg-primary-50 text-primary-700">
-                                                            {activities.find(a => a.id === log.activity_id)?.name}
-                                                        </span>
-                                                    )}
-                                                </div>
-                                            )
-                                        )}
-                                        {((log.billable_workers > 0 && log.billable_comment) || (log.is_contract_work === false && log.comment)) && (
-                                            <div className="text-sm text-slate-600 bg-amber-50/50 p-2 rounded-lg border border-amber-100 mb-2">
-                                                <span className="font-bold block mb-0.5 text-xs text-amber-800">Kommentar (Regning):</span>
-                                                {log.billable_comment || log.comment}
-                                            </div>
-                                        )}
-                                        {log.notes && (
-                                            <p className="text-xs text-slate-500 bg-slate-50 p-2 rounded-lg">{log.notes}</p>
-                                        )}
-                                    </div>
-                                    <button
-                                        onClick={() => {
-                                            const positionIds = log.daily_manpower_positions?.map((p: any) => p.global_area_id) || [];
-                                            setNewManpower({
-                                                id: log.id,
-                                                date: log.date,
-                                                contract_workers: log.contract_workers ?? '',
-                                                billable_workers: log.billable_workers ?? '',
-                                                notes: log.notes || '',
-                                                billable_comment: log.billable_comment || log.comment || '',
-                                                billable_activities: log.billable_activities || (log.activity_id ? [{ activity_id: log.activity_id, hours: log.hours_billable }] : []),
-                                                position_ids: positionIds
-                                            });
-                                            setShowManpowerModal(true);
-                                        }}
-                                        className="p-2 text-slate-400 hover:text-primary-600 hover:bg-primary-50 rounded-xl transition-colors"
-                                    >
-                                        <Edit2 className="w-4 h-4" />
-                                    </button>
-                                </div>
-                            );
-                            })
-                        )}
-                    </div>
-                </div>
-            </div>
+
 
             {/* Manpower Modal */}
             {showManpowerModal && (
@@ -848,7 +926,7 @@ export default function Bemanning() {
                                                         className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2.5 font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500 transition-all text-sm sm:text-base"
                                                     >
                                                         <option value="">Velg aktivitet...</option>
-                                                        {activities.map(activity => (
+                                                        {filteredActivitiesForDropdown.map(activity => (
                                                             <option key={activity.id} value={activity.id}>
                                                                 {activity.name}{activity.change_order_number ? ` (${activity.change_order_number})` : ''}
                                                             </option>
@@ -976,9 +1054,37 @@ export default function Bemanning() {
                                         </button>
                                     </div>
                                 </div>
-                            </div>
+                        </div>
 
-                            {/* Position/Area Selection - Multi-select with checkboxes */}
+                        <div className="bg-slate-50 border border-slate-200 rounded-3xl p-4 md:p-5">
+                            <label className="block text-sm font-bold text-slate-500 uppercase tracking-widest mb-4 text-center">Totalt antall arbeidere (manuell)</label>
+                            <div className="flex items-center justify-between gap-4">
+                                <button 
+                                    type="button" 
+                                    onClick={() => setNewManpower({ ...newManpower, total_workers_per_day: Math.max(0, (Number(newManpower.total_workers_per_day) || 0) - 1) })}
+                                    className="w-16 h-16 shrink-0 bg-white border border-slate-200/80 rounded-2xl flex items-center justify-center text-slate-500 hover:bg-slate-100 hover:text-slate-800 hover:border-slate-300 active:scale-95 transition-all shadow-sm"
+                                >
+                                    <Minus className="w-8 h-8" />
+                                </button>
+                                <input
+                                    type="number"
+                                    min="0"
+                                    value={newManpower.total_workers_per_day}
+                                    onChange={(e) => setNewManpower({ ...newManpower, total_workers_per_day: e.target.value === '' ? '' : Number(e.target.value) })}
+                                    className="w-full bg-white border border-slate-200/80 rounded-2xl px-2 py-4 text-3xl font-black text-slate-900 text-center focus:outline-none focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500 shadow-inner"
+                                    placeholder="0"
+                                />
+                                <button 
+                                    type="button" 
+                                    onClick={() => setNewManpower({ ...newManpower, total_workers_per_day: (Number(newManpower.total_workers_per_day) || 0) + 1 })}
+                                    className="w-16 h-16 shrink-0 bg-white border border-slate-200/80 rounded-2xl flex items-center justify-center text-primary-500 hover:bg-primary-50 hover:text-primary-700 hover:border-primary-200 active:scale-95 transition-all shadow-sm"
+                                >
+                                    <Plus className="w-8 h-8" />
+                                </button>
+                            </div>
+                        </div>
+
+                        {/* Position/Area Selection - Multi-select with checkboxes */}
                             {assignedAreas.length > 0 && (
                                 <div>
                                     <label className="block text-sm font-bold text-slate-700 mb-2">Posisjoner/Områder (valgfritt)</label>
@@ -1015,7 +1121,7 @@ export default function Bemanning() {
                             <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-4">
                                 <div className="flex items-center justify-between pb-2 border-b border-slate-200/60">
                                     <span className="text-sm font-bold text-slate-700">Totalt antall arbeidere i dag:</span>
-                                    <span className="text-xl font-extrabold text-primary-600">{(Number(newManpower.contract_workers) || 0) + (Number(newManpower.billable_workers) || 0)}</span>
+                                    <span className="text-xl font-extrabold text-primary-600">{Number(newManpower.total_workers_per_day) || 0}</span>
                                 </div>
                                 <div className="flex items-center justify-between pb-2 border-b border-slate-200/60">
                                     <span className="text-sm font-bold text-slate-700">Regningstimer:</span>

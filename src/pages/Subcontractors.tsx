@@ -1,13 +1,13 @@
 import { useState } from 'react';
 import { supabase } from '../lib/supabase';
-import { Users, Plus, Edit2, CheckCircle2, X, Search, Loader2 } from 'lucide-react';
+import { Users, Plus, Edit2, CheckCircle2, X, Search, Loader2, Trash2 } from 'lucide-react';
 import { useSubcontractor } from '../contexts/SubcontractorContext';
 
 export default function Subcontractors() {
     const { subcontractors, refreshSubcontractors } = useSubcontractor();
     const [loading, setLoading] = useState(false);
     const [showModal, setShowModal] = useState(false);
-    const [newSub, setNewSub] = useState<{ id?: string, company_name: string, trade: string, original_contract_value: number, org_number: string }>({ company_name: '', trade: '', original_contract_value: 0, org_number: '' });
+    const [newSub, setNewSub] = useState<{ id?: string, company_name: string, trade: string, original_contract_value: number, org_number: string, type: 'subcontractor' | 'project' }>({ company_name: '', trade: '', original_contract_value: 0, org_number: '', type: 'subcontractor' });
 
     // Brønnøysund Search State
     const [searchQuery, setSearchQuery] = useState('');
@@ -51,7 +51,8 @@ export default function Subcontractors() {
             company_name: newSub.company_name,
             trade: newSub.trade,
             original_contract_value: newSub.original_contract_value,
-            org_number: newSub.org_number,
+            org_number: newSub.type === 'project' ? '' : newSub.org_number,
+            type: newSub.type,
             status: 'active'
         };
 
@@ -66,7 +67,7 @@ export default function Subcontractors() {
         if (!error) {
             await refreshSubcontractors();
             setShowModal(false);
-            setNewSub({ company_name: '', trade: '', original_contract_value: 0, org_number: '' });
+            setNewSub({ company_name: '', trade: '', original_contract_value: 0, org_number: '', type: 'subcontractor' });
             setSearchQuery('');
         } else {
             alert('Kunne ikke lagre underentreprenør. Sjekk at du har kjørt SQL-scriptet.');
@@ -80,11 +81,30 @@ export default function Subcontractors() {
             company_name: sub.company_name,
             trade: sub.trade,
             original_contract_value: sub.original_contract_value,
-            org_number: sub.org_number || ''
+            org_number: sub.org_number || '',
+            type: sub.type || 'subcontractor'
         });
         setSearchQuery(sub.company_name);
         setShowModal(true);
     };
+
+    const handleDeleteSub = async (sub: any) => {
+        if (!confirm(`Slett underentreprenør "${sub.company_name}"? Dette vil også slette tilhørende data (kontrakter, aktiviteter, mannskap, etc.).`)) return;
+        const { error } = await supabase.from('subcontractors').delete().eq('id', sub.id);
+        if (!error) {
+            await refreshSubcontractors();
+        } else {
+            alert('Kunne ikke slette underentreprenør. Sjekk tilkoblingen og prøv igjen.');
+        }
+    };
+
+    // Subcontractors first (alphabetical), then projects (alphabetical) at the bottom
+    const sortedSubcontractors = [...subcontractors].sort((a, b) => {
+        const aIsProject = a.type === 'project' ? 1 : 0;
+        const bIsProject = b.type === 'project' ? 1 : 0;
+        if (aIsProject !== bIsProject) return aIsProject - bIsProject;
+        return a.company_name.localeCompare(b.company_name, 'no');
+    });
 
     return (
         <div className="space-y-6">
@@ -95,7 +115,7 @@ export default function Subcontractors() {
                 </div>
                 <button
                     onClick={() => {
-                        setNewSub({ company_name: '', trade: '', original_contract_value: 0, org_number: '' });
+                        setNewSub({ company_name: '', trade: '', original_contract_value: 0, org_number: '', type: 'subcontractor' });
                         setSearchQuery('');
                         setShowModal(true);
                     }}
@@ -126,15 +146,20 @@ export default function Subcontractors() {
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-100">
-                                {subcontractors.map((sub) => (
-                                    <tr key={sub.id} className="hover:bg-slate-50/80 transition-colors">
+                                {sortedSubcontractors.map((sub) => (
+                                    <tr key={sub.id} className={`transition-colors ${sub.type === 'project' ? 'bg-purple-50/50 hover:bg-purple-100/60' : 'hover:bg-slate-50/80'}`}>
                                         <td className="py-4 px-6">
                                             <div className="flex items-center">
                                                 <div className="bg-blue-50 p-2 rounded-lg mr-3 shadow-sm border border-blue-100/50">
                                                     <Users className="w-4 h-4 text-blue-600" />
                                                 </div>
                                                 <div>
-                                                    <div className="font-bold text-slate-900">{sub.company_name}</div>
+                                                    <div className="flex items-center gap-2">
+                                                        <span className="font-bold text-slate-900">{sub.company_name}</span>
+                                                        {sub.type === 'project' && (
+                                                            <span className="inline-flex items-center px-2.5 py-1 rounded-md text-[11px] font-extrabold bg-purple-100 text-purple-700 border border-purple-200">Prosjekt</span>
+                                                        )}
+                                                    </div>
                                                     {sub.org_number && (
                                                         <div className="text-xs font-medium text-slate-500">Org: {sub.org_number}</div>
                                                     )}
@@ -159,6 +184,9 @@ export default function Subcontractors() {
                                             <button onClick={() => handleEditClick(sub)} className="text-slate-400 hover:text-primary-600 hover:bg-primary-50 transition-colors p-2 focus:outline-none focus:ring-2 focus:ring-primary-500 rounded-xl">
                                                 <Edit2 className="w-4 h-4" />
                                             </button>
+                                            <button onClick={() => handleDeleteSub(sub)} className="text-slate-400 hover:text-red-600 hover:bg-red-50 transition-colors p-2 focus:outline-none focus:ring-2 focus:ring-red-500 rounded-xl" title="Slett underentreprenør">
+                                                <Trash2 className="w-4 h-4" />
+                                            </button>
                                         </td>
                                     </tr>
                                 ))}
@@ -179,43 +207,80 @@ export default function Subcontractors() {
                             </button>
                         </div>
                         <form onSubmit={handleAddSub} className="p-6 space-y-5" onClick={() => setShowDropdown(false)}>
-                            <div className="relative">
-                                <label className="block text-sm font-bold text-slate-700 mb-1">Søk i Brønnøysundregisteret</label>
+                            {/* Type selector */}
+                            <div>
+                                <label className="block text-sm font-bold text-slate-700 mb-1">Type</label>
+                                <div className="flex gap-2">
+                                    <button
+                                        type="button"
+                                        onClick={() => setNewSub({ ...newSub, type: 'subcontractor' })}
+                                        className={`flex-1 px-3 py-2.5 rounded-xl font-bold text-sm border transition-colors ${newSub.type === 'subcontractor' ? 'bg-primary-600 text-white border-primary-600' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}
+                                    >
+                                        Underentreprenør
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => setNewSub({ ...newSub, type: 'project' })}
+                                        className={`flex-1 px-3 py-2.5 rounded-xl font-bold text-sm border transition-colors ${newSub.type === 'project' ? 'bg-purple-600 text-white border-purple-600' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}
+                                    >
+                                        Prosjekt
+                                    </button>
+                                </div>
+                            </div>
+
+                            {newSub.type === 'subcontractor' ? (
                                 <div className="relative">
-                                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                                        {isSearching ? <Loader2 className="h-5 w-5 text-slate-400 animate-spin" /> : <Search className="h-5 w-5 text-slate-400" />}
+                                    <label className="block text-sm font-bold text-slate-700 mb-1">Søk i Brønnøysundregisteret</label>
+                                    <div className="relative">
+                                        <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                                            {isSearching ? <Loader2 className="h-5 w-5 text-slate-400 animate-spin" /> : <Search className="h-5 w-5 text-slate-400" />}
+                                        </div>
+                                        <input
+                                            type="text"
+                                            required
+                                            value={searchQuery}
+                                            onChange={(e) => handleSearch(e.target.value)}
+                                            onClick={(e) => { e.stopPropagation(); setShowDropdown(true); }}
+                                            className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-10 pr-4 py-2.5 font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500 transition-all placeholder:text-slate-400"
+                                            placeholder="Søk på firmanavn..."
+                                        />
                                     </div>
+
+                                    {showDropdown && searchResults.length > 0 && (
+                                        <div className="absolute z-10 mt-1 w-full bg-white rounded-xl shadow-xl border border-slate-200 max-h-60 overflow-y-auto">
+                                            {searchResults.map((company) => (
+                                                <div
+                                                    key={company.organisasjonsnummer}
+                                                    onClick={() => handleSelectCompany(company)}
+                                                    className="px-4 py-3 hover:bg-slate-50 cursor-pointer border-b border-slate-100 last:border-0"
+                                                >
+                                                    <div className="font-bold text-slate-800">{company.navn}</div>
+                                                    <div className="text-xs text-slate-500 font-medium mt-0.5">Org.nr: {company.organisasjonsnummer}</div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+                            ) : (
+                                <div>
+                                    <label className="block text-sm font-bold text-slate-700 mb-1">Prosjektnavn</label>
                                     <input
                                         type="text"
                                         required
-                                        value={searchQuery}
-                                        onChange={(e) => handleSearch(e.target.value)}
-                                        onClick={(e) => { e.stopPropagation(); setShowDropdown(true); }}
-                                        className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-10 pr-4 py-2.5 font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500 transition-all placeholder:text-slate-400"
-                                        placeholder="Søk på firmanavn..."
+                                        value={newSub.company_name}
+                                        onChange={(e) => setNewSub({ ...newSub, company_name: e.target.value })}
+                                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500 transition-all placeholder:text-slate-400"
+                                        placeholder="F.eks. Taktekking etg. 3-5"
                                     />
                                 </div>
-
-                                {showDropdown && searchResults.length > 0 && (
-                                    <div className="absolute z-10 mt-1 w-full bg-white rounded-xl shadow-xl border border-slate-200 max-h-60 overflow-y-auto">
-                                        {searchResults.map((company) => (
-                                            <div
-                                                key={company.organisasjonsnummer}
-                                                onClick={() => handleSelectCompany(company)}
-                                                className="px-4 py-3 hover:bg-slate-50 cursor-pointer border-b border-slate-100 last:border-0"
-                                            >
-                                                <div className="font-bold text-slate-800">{company.navn}</div>
-                                                <div className="text-xs text-slate-500 font-medium mt-0.5">Org.nr: {company.organisasjonsnummer}</div>
-                                            </div>
-                                        ))}
-                                    </div>
-                                )}
-                            </div>
+                            )}
                             <div>
-                                <label className="block text-sm font-bold text-slate-700 mb-1">Fag / Disiplin</label>
+                                <label className="block text-sm font-bold text-slate-700 mb-1">
+                                    Fag / Disiplin {newSub.type === 'project' && <span className="text-slate-400 font-normal normal-case">(valgfritt)</span>}
+                                </label>
                                 <input
                                     type="text"
-                                    required
+                                    required={newSub.type === 'subcontractor'}
                                     value={newSub.trade}
                                     onChange={(e) => setNewSub({ ...newSub, trade: e.target.value })}
                                     className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500 transition-all placeholder:text-slate-400"
@@ -223,10 +288,12 @@ export default function Subcontractors() {
                                 />
                             </div>
                             <div>
-                                <label className="block text-sm font-bold text-slate-700 mb-1">Opprinnelig Kontraktssum (NOK)</label>
+                                <label className="block text-sm font-bold text-slate-700 mb-1">
+                                    Opprinnelig Kontraktssum (NOK) {newSub.type === 'project' && <span className="text-slate-400 font-normal normal-case">(valgfritt)</span>}
+                                </label>
                                 <input
                                     type="number"
-                                    required
+                                    required={newSub.type === 'subcontractor'}
                                     min="0"
                                     value={newSub.original_contract_value || ''}
                                     onChange={(e) => setNewSub({ ...newSub, original_contract_value: Number(e.target.value) })}

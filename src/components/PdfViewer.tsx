@@ -13,6 +13,7 @@ export default function PdfViewer({ url }: PdfViewerProps) {
     const containerRef = useRef<HTMLDivElement>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
+    const [renderFailed, setRenderFailed] = useState(false);
     const [scale, setScale] = useState(0); // 0 = Auto-fit
     const [pdf, setPdf] = useState<any>(null);
     const [pageNum, setPageNum] = useState(1);
@@ -21,7 +22,9 @@ export default function PdfViewer({ url }: PdfViewerProps) {
     useEffect(() => {
         setLoading(true);
         setError('');
-        const loadingTask = pdfjsLib.getDocument(url);
+        setRenderFailed(false);
+        setPageNum(1);
+        const loadingTask = pdfjsLib.getDocument({ url, disableAutoFetch: false, disableStream: false });
         loadingTask.promise.then(pdfDoc => {
             setPdf(pdfDoc);
             setNumPages(pdfDoc.numPages);
@@ -34,48 +37,76 @@ export default function PdfViewer({ url }: PdfViewerProps) {
     }, [url]);
 
     useEffect(() => {
-        if (pdf && canvasRef.current && containerRef.current) {
-            let isRenderCancelled = false;
+        if (renderFailed || !pdf || !canvasRef.current || !containerRef.current) return;
+        let isRenderCancelled = false;
 
-            pdf.getPage(pageNum).then((page: any) => {
-                if (isRenderCancelled) return;
+        pdf.getPage(pageNum).then((page: any) => {
+            if (isRenderCancelled) return;
 
-                const canvas = canvasRef.current;
-                const context = canvas?.getContext('2d');
-                if (!canvas || !context) return;
-                
-                // Determine scale
-                const unscaledViewport = page.getViewport({ scale: 1.0 });
-                const containerWidth = containerRef.current!.clientWidth - 48; // padding
-                const containerHeight = containerRef.current!.clientHeight - 48;
-                
-                let effectiveScale = scale;
-                if (scale === 0) {
-                    // Fit to width or height, whichever is more restrictive
-                    const widthScale = containerWidth / unscaledViewport.width;
-                    const heightScale = containerHeight / unscaledViewport.height;
-                    effectiveScale = Math.min(widthScale, heightScale);
-                    // Don't zoom in too much on small documents
-                    if (effectiveScale > 2) effectiveScale = 2;
-                }
+            const canvas = canvasRef.current;
+            const context = canvas?.getContext('2d');
+            if (!canvas || !context) return;
+            
+            // Determine scale
+            const unscaledViewport = page.getViewport({ scale: 1.0 });
+            const containerWidth = containerRef.current!.clientWidth - 48;
+            const containerHeight = containerRef.current!.clientHeight - 48;
+            
+            let effectiveScale = scale;
+            if (scale === 0) {
+                const widthScale = containerWidth / unscaledViewport.width;
+                const heightScale = containerHeight / unscaledViewport.height;
+                effectiveScale = Math.min(widthScale, heightScale);
+                if (effectiveScale > 2) effectiveScale = 2;
+            }
 
-                const viewport = page.getViewport({ scale: effectiveScale });
-                canvas.height = viewport.height;
-                canvas.width = viewport.width;
+            const viewport = page.getViewport({ scale: effectiveScale });
+            canvas.height = viewport.height;
+            canvas.width = viewport.width;
 
-                const renderContext = {
-                    canvasContext: context,
-                    viewport: viewport
-                };
-                
-                page.render(renderContext);
-            });
-
-            return () => {
-                isRenderCancelled = true;
+            const renderContext = {
+                canvasContext: context,
+                viewport: viewport
             };
-        }
-    }, [pdf, pageNum, scale]);
+            
+            page.render(renderContext).promise.then(() => {
+                // Render succeeded
+            }).catch((err: any) => {
+                console.error('PDF render failed, falling back to iframe:', err);
+                if (!isRenderCancelled) {
+                    setRenderFailed(true);
+                }
+            });
+        }).catch((err: any) => {
+            console.error('PDF page load failed, falling back to iframe:', err);
+            if (!isRenderCancelled) {
+                setRenderFailed(true);
+            }
+        });
+
+        return () => {
+            isRenderCancelled = true;
+        };
+    }, [pdf, pageNum, scale, renderFailed]);
+
+    // If canvas rendering failed, fall back to browser's built-in PDF viewer via iframe
+    if (renderFailed) {
+        return (
+            <div className="w-full h-full flex flex-col bg-slate-200 overflow-hidden relative">
+                {pdf && (
+                    <div className="flex items-center justify-center gap-2 sm:gap-4 bg-slate-800 text-white p-2 shrink-0 z-10 shadow-md flex-wrap">
+                        <span className="text-sm font-medium px-2">Forhåndsvisning i nettleser</span>
+                        <a href={url} target="_blank" rel="noopener noreferrer" className="px-3 py-1 bg-primary-600 rounded hover:bg-primary-500 text-sm font-medium">Åpne i ny fane</a>
+                    </div>
+                )}
+                <iframe
+                    src={url}
+                    className="flex-1 w-full border-none bg-white"
+                    title="PDF-forhåndsvisning"
+                />
+            </div>
+        );
+    }
 
     return (
         <div className="w-full h-full flex flex-col bg-slate-200 overflow-hidden relative">
@@ -91,6 +122,9 @@ export default function PdfViewer({ url }: PdfViewerProps) {
                     <button onClick={() => setScale(s => s === 0 ? 0.8 : s * 0.8)} className="px-3 py-1 bg-slate-700 rounded hover:bg-slate-600 text-sm font-medium">-</button>
                     <button onClick={() => setScale(0)} className="px-3 py-1 bg-slate-700 rounded hover:bg-slate-600 text-sm font-medium" title="Tilpass til skjerm">Tilpass</button>
                     <button onClick={() => setScale(s => s === 0 ? 1.2 : s * 1.2)} className="px-3 py-1 bg-slate-700 rounded hover:bg-slate-600 text-sm font-medium">+</button>
+                    
+                    <div className="w-px h-6 bg-slate-600 mx-1 sm:mx-2 hidden sm:block"></div>
+                    <a href={url} target="_blank" rel="noopener noreferrer" className="px-3 py-1 bg-primary-600 rounded hover:bg-primary-500 text-sm font-medium hidden sm:block">Åpne i ny fane</a>
                 </div>
             )}
             

@@ -8,6 +8,7 @@ type Subcontractor = {
     original_contract_value?: number;
     status?: string;
     org_number?: string;
+    type?: string;
 };
 
 type SubcontractorContextType = {
