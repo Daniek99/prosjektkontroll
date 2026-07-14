@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useSubcontractor } from '../contexts/SubcontractorContext';
 import { supabase } from '../lib/supabase';
 import { ClipboardList, Plus, X, ArrowUpDown, ExternalLink, Pencil, Check, Trash2, Filter } from 'lucide-react';
@@ -43,6 +43,18 @@ export default function ActivityRegisterWidget({ selectedSubcontractorId: propSe
     const [editingId, setEditingId] = useState<string | null>(null);
     const [editData, setEditData] = useState<Partial<Activity>>({});
     const [saving, setSaving] = useState(false);
+
+    // Scroll preservation: keeps the user in the same spot after data changes.
+    const scrollRef = useRef<HTMLDivElement | null>(null);
+    const scrollTopRef = useRef<number>(0);
+    const preserveScroll = (fn: () => void) => {
+        if (scrollRef.current) scrollTopRef.current = scrollRef.current.scrollTop;
+        fn();
+        // Restore after React commits the update (next frame).
+        requestAnimationFrame(() => {
+            if (scrollRef.current) scrollRef.current.scrollTop = scrollTopRef.current;
+        });
+    };
 
     useEffect(() => {
         loadActivities();
@@ -109,7 +121,7 @@ export default function ActivityRegisterWidget({ selectedSubcontractorId: propSe
         const subId = newActivity.subcontractor_id || selectedSubcontractorId;
         if (!newActivity.name || !subId) return;
         setCreating(true);
-        const { error } = await supabase.from('work_activities').insert([{
+        const { data, error } = await supabase.from('work_activities').insert([{
             name: newActivity.name,
             subcontractor_id: subId,
             start_date: newActivity.start_date || null,
@@ -117,12 +129,21 @@ export default function ActivityRegisterWidget({ selectedSubcontractorId: propSe
             deadline: newActivity.deadline || null,
             status: 'planned',
             is_active: true
-        }]);
+        }]).select();
         setCreating(false);
-        if (!error) {
+        if (!error && data) {
             setShowNewForm(false);
             setNewActivity({ name: '', start_date: '', expected_end_date: '', deadline: '', subcontractor_id: '' });
-            loadActivities();
+            // Update local state in place (no full refetch — keeps scroll position)
+            const created = data[0] as Activity;
+            preserveScroll(() => {
+                setActivitiesBySub(prev => {
+                    const next = { ...prev };
+                    next[subId] = [created, ...(next[subId] || [])];
+                    return next;
+                });
+                setActivities(prev => [created, ...prev]);
+            });
         }
     }
 
@@ -158,9 +179,26 @@ export default function ActivityRegisterWidget({ selectedSubcontractorId: propSe
             .eq('id', editingId);
         setSaving(false);
         if (!error) {
-            setEditingId(null);
-            setEditData({});
-            loadActivities();
+            const editingIdValue = editingId;
+            const editingSubId = activitiesBySub ? Object.keys(activitiesBySub).find(sid => (activitiesBySub[sid] || []).some(a => a.id === editingIdValue)) : null;
+            const updated: Activity = {
+                ...activities.find(a => a.id === editingIdValue)!,
+                ...editData,
+                id: editingIdValue,
+            } as Activity;
+            preserveScroll(() => {
+                setEditingId(null);
+                setEditData({});
+                // Update in place
+                setActivities(prev => prev.map(a => a.id === editingIdValue ? updated : a));
+                if (editingSubId) {
+                    setActivitiesBySub(prev => {
+                        const next = { ...prev };
+                        next[editingSubId] = (next[editingSubId] || []).map(a => a.id === editingIdValue ? updated : a);
+                        return next;
+                    });
+                }
+            });
         }
     }
 
@@ -171,7 +209,16 @@ export default function ActivityRegisterWidget({ selectedSubcontractorId: propSe
             .update({ is_active: false })
             .eq('id', actId);
         if (!error) {
-            loadActivities();
+            preserveScroll(() => {
+                setActivities(prev => prev.filter(a => a.id !== actId));
+                setActivitiesBySub(prev => {
+                    const next = { ...prev };
+                    Object.keys(next).forEach(sid => {
+                        next[sid] = (next[sid] || []).filter(a => a.id !== actId);
+                    });
+                    return next;
+                });
+            });
         }
     }
 
@@ -320,7 +367,7 @@ export default function ActivityRegisterWidget({ selectedSubcontractorId: propSe
                         <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{Object.values(activitiesBySub).reduce((sum, arr) => sum + arr.length, 0)} aktiviteter</span>
                     </div>
 
-                    <div className="flex-1 overflow-y-auto p-6 space-y-4">
+                    <div ref={scrollRef} className="flex-1 overflow-y-auto p-6 space-y-4">
                         {loading ? (
                             <div className="flex justify-center py-10"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"></div></div>
                         ) : selectedSubIds.length === 0 ? (
