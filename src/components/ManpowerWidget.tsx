@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useSubcontractor } from '../contexts/SubcontractorContext';
 import { supabase } from '../lib/supabase';
-import { Users, Plus, Minus, Clock, Maximize2, X, Copy, Trash2, Settings, List, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Users, Plus, Minus, Clock, Maximize2, X, Copy, Trash2, Settings, List, ChevronLeft, ChevronRight, ChevronDown, ChevronUp } from 'lucide-react';
 import DatePickerWithWeek from './DatePickerWithWeek';
 
 export default function ManpowerWidget({ selectedSubcontractorId: propSelectedSubcontractorId }: { selectedSubcontractorId?: string | null }) {
@@ -38,6 +38,12 @@ export default function ManpowerWidget({ selectedSubcontractorId: propSelectedSu
     const [savingSubId, setSavingSubId] = useState<string | null>(null);
     const [allModeDate, setAllModeDate] = useState('');
     const [manpowerBySub, setManpowerBySub] = useState<Record<string, { total: number | string; contract: number | string; billable: number | string; notes: string; hasLogged: boolean }>>({});
+
+    // Per-subcontractor expand & billable-activities state (in the all-mode list)
+    const [expandSubId, setExpandSubId] = useState<string | null>(null);
+    const [activitiesByAllSub, setActivitiesByAllSub] = useState<Record<string, any[]>>({});
+    const [billActsBySub, setBillActsBySub] = useState<Record<string, Array<{ activity_id: string; hours: string | number }>>>({});
+    const [billCommentBySub, setBillCommentBySub] = useState<Record<string, string>>({});
 
     const todayStr = (() => {
         const now = new Date();
@@ -273,21 +279,73 @@ export default function ManpowerWidget({ selectedSubcontractorId: propSelectedSu
         const tw = Number(st.total) || 0;
         // Allow logging 0 manpower
         setSavingSubId(subId);
-        const payload = {
+        // Build billable activities payload if any are set
+        const billActs = (billActsBySub[subId] || []).filter(a => a.activity_id);
+        const billHours = billActs.reduce((sum, a) => sum + (Number(a.hours) || 0), 0);
+        const billComment = billCommentBySub[subId] || '';
+        const payload: any = {
             subcontractor_id: subId, date: allModeDate,
             workers_count: tw, contract_workers: Number(st.contract) || 0, billable_workers: Number(st.billable) || 0,
-            is_contract_work: false, notes: st.notes || '', billable_comment: '',
-            activity_id: null, hours_contract: 0, hours_billable: 0, billable_activities: []
+            is_contract_work: false, notes: st.notes || '', billable_comment: billComment,
+            activity_id: billActs.length === 1 ? billActs[0].activity_id : null,
+            hours_contract: 0,
+            hours_billable: billHours,
+            billable_activities: billActs
         };
         const { data: existing } = await supabase
             .from('daily_manpower').select('id').eq('subcontractor_id', subId).eq('date', allModeDate).maybeSingle();
+        let manpowerId: string;
         if (existing) {
-            await supabase.from('daily_manpower').update(payload).eq('id', existing.id);
+            const { data } = await supabase.from('daily_manpower').update(payload).eq('id', existing.id).select();
+            manpowerId = data?.[0]?.id || existing.id;
+            await supabase.from('daily_manpower_positions').delete().eq('daily_manpower_id', manpowerId);
         } else {
-            await supabase.from('daily_manpower').insert([payload]);
+            const { data } = await supabase.from('daily_manpower').insert([payload]).select();
+            manpowerId = data?.[0]?.id || '';
         }
         setManpowerBySub((prev) => ({ ...prev, [subId]: { ...prev[subId], hasLogged: true } }));
         setSavingSubId(null);
+    }
+
+    // Load activities for a sub when it's expanded, and preload existing billable activities from the manpower log
+    async function expandSubForBillable(subId: string) {
+        setExpandSubId(subId);
+        if (!activitiesByAllSub[subId]) {
+            const { data } = await supabase
+                .from('work_activities')
+                .select('*')
+                .eq('subcontractor_id', subId)
+                .eq('is_active', true)
+                .order('name');
+            setActivitiesByAllSub(prev => ({ ...prev, [subId]: data || [] }));
+        }
+        // If we haven't preloaded billable activities for this sub+date, do it now
+        if (!billActsBySub[subId]) {
+            const { data: log } = await supabase
+                .from('daily_manpower')
+                .select('billable_activities, billable_comment')
+                .eq('subcontractor_id', subId)
+                .eq('date', allModeDate)
+                .maybeSingle();
+            if (log) {
+                const acts = log.billable_activities && log.billable_activities.length > 0
+                    ? log.billable_activities
+                    : [];
+                setBillActsBySub(prev => ({ ...prev, [subId]: acts }));
+                setBillCommentBySub(prev => ({ ...prev, [subId]: log.billable_comment || '' }));
+            } else {
+                setBillActsBySub(prev => ({ ...prev, [subId]: [] }));
+                setBillCommentBySub(prev => ({ ...prev, [subId]: '' }));
+            }
+        }
+    }
+
+    function updateSubBillActs(subId: string, acts: Array<{ activity_id: string; hours: string | number }>) {
+        setBillActsBySub(prev => ({ ...prev, [subId]: acts }));
+    }
+
+    function updateSubBillComment(subId: string, comment: string) {
+        setBillCommentBySub(prev => ({ ...prev, [subId]: comment }));
     }
 
     const now = new Date();
@@ -544,10 +602,81 @@ export default function ManpowerWidget({ selectedSubcontractorId: propSelectedSu
                                             </div>
                                         </div>
                                         <input type="text" value={st.notes} onChange={(e) => updateSubField(sub.id, 'notes', e.target.value)} placeholder="Kommentar (valgfritt)..." className="w-full mt-2 px-2 py-1 bg-white border border-slate-200 rounded text-[10px] font-medium text-slate-700 focus:outline-none focus:ring-1 focus:ring-primary-500/50 placeholder:text-slate-400" />
-                                        <button onClick={() => saveForSub(sub.id)} disabled={savingSubId === sub.id}
-                                            className="w-full mt-2 py-1.5 bg-primary-600 text-white font-bold text-[11px] rounded-lg hover:bg-primary-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1">
-                                            {savingSubId === sub.id ? <div className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : st.hasLogged ? 'Oppdater' : 'Loggfør'}
-                                        </button>
+                                        <div className="flex gap-1.5 mt-2">
+                                            <button onClick={() => saveForSub(sub.id)} disabled={savingSubId === sub.id}
+                                                className="flex-1 py-1.5 bg-primary-600 text-white font-bold text-[11px] rounded-lg hover:bg-primary-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1">
+                                                {savingSubId === sub.id ? <div className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : st.hasLogged ? 'Oppdater' : 'Loggfør'}
+                                            </button>
+                                            <button
+                                                onClick={() => {
+                                                    if (expandSubId === sub.id) {
+                                                        setExpandSubId(null);
+                                                    } else {
+                                                        expandSubForBillable(sub.id);
+                                                    }
+                                                }}
+                                                className={`px-2 py-1.5 rounded-lg text-[11px] font-bold transition-colors flex items-center gap-1 ${
+                                                    expandSubId === sub.id
+                                                        ? 'bg-amber-100 text-amber-700 border border-amber-200'
+                                                        : 'bg-slate-100 text-slate-600 hover:bg-amber-50 hover:text-amber-700 border border-slate-200'
+                                                }`}
+                                                title={expandSubId === sub.id ? 'Skjul regningsaktiviteter' : 'Utvid for å legge til regningsaktiviteter'}
+                                            >
+                                                {expandSubId === sub.id ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                                                Aktiviteter
+                                            </button>
+                                        </div>
+
+                                        {/* Expanded billable activities section */}
+                                        {expandSubId === sub.id && (
+                                            <div className="mt-2 p-2 bg-amber-50/40 border border-amber-200 rounded-xl space-y-2">
+                                                <div className="flex items-center justify-between">
+                                                    <span className="text-[10px] font-bold text-amber-700 uppercase tracking-widest">Regningsaktiviteter for {sub.company_name}</span>
+                                                    <span className="text-[9px] font-bold text-amber-600">{(billActsBySub[sub.id] || []).filter(a => a.activity_id).length} valgt</span>
+                                                </div>
+                                                {(() => {
+                                                    const acts = billActsBySub[sub.id] || [];
+                                                    const subActs = activitiesByAllSub[sub.id] || [];
+                                                    const filteredActs = subActs.filter(a => a.status !== 'completed');
+                                                    if (acts.length === 0) {
+                                                        return (
+                                                            <p className="text-[10px] text-slate-500 italic">Ingen aktiviteter lagt til enda.</p>
+                                                        );
+                                                    }
+                                                    return acts.map((act, idx) => (
+                                                        <div key={idx} className="flex gap-1 items-start">
+                                                            <select value={act.activity_id} onChange={(e) => {
+                                                                const na = [...acts];
+                                                                na[idx] = { ...na[idx], activity_id: e.target.value };
+                                                                updateSubBillActs(sub.id, na);
+                                                            }} className="flex-1 bg-white border border-amber-200 rounded px-1.5 py-1 text-[10px] font-bold text-slate-800 focus:outline-none focus:ring-1 focus:ring-amber-500/50">
+                                                                <option value="">Velg aktivitet...</option>
+                                                                {filteredActs.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+                                                            </select>
+                                                            <div className="w-16 relative">
+                                                                <input type="number" min="0" step="0.5" value={act.hours} onChange={(e) => {
+                                                                    const na = [...acts];
+                                                                    na[idx] = { ...na[idx], hours: e.target.value === '' ? '' : Number(e.target.value) };
+                                                                    updateSubBillActs(sub.id, na);
+                                                                }} className="w-full bg-white border border-amber-200 rounded px-1 py-1 text-[10px] font-bold text-amber-900 text-center focus:outline-none focus:ring-1 focus:ring-amber-500/50 pr-4" placeholder="0" />
+                                                                <span className="absolute right-1 top-1/2 -translate-y-1/2 text-amber-500 font-bold text-[10px] pointer-events-none">t</span>
+                                                            </div>
+                                                            <button type="button" onClick={() => updateSubBillActs(sub.id, acts.filter((_, i) => i !== idx))} className="p-1 text-slate-400 hover:text-red-500"><Trash2 className="w-3 h-3" /></button>
+                                                        </div>
+                                                    ));
+                                                })()}
+                                                <button type="button" onClick={() => updateSubBillActs(sub.id, [...(billActsBySub[sub.id] || []), { activity_id: '', hours: '' }])} className="w-full py-1.5 border border-dashed border-amber-200 rounded-lg text-[10px] font-bold text-amber-600 hover:text-amber-700 hover:border-amber-300 transition-colors flex items-center justify-center gap-1 bg-white">
+                                                    <Plus className="w-3 h-3" /> Legg til regningsaktivitet
+                                                </button>
+                                                <textarea
+                                                    rows={1}
+                                                    value={billCommentBySub[sub.id] || ''}
+                                                    onChange={(e) => updateSubBillComment(sub.id, e.target.value)}
+                                                    placeholder="Kommentar for regningsarbeid (valgfritt)..."
+                                                    className="w-full bg-white border border-amber-200 rounded px-2 py-1 text-[10px] font-medium text-slate-700 focus:outline-none focus:ring-1 focus:ring-amber-500/50 placeholder:text-slate-400 resize-none"
+                                                />
+                                            </div>
+                                        )}
                                     </div>
                                 );
                             })
