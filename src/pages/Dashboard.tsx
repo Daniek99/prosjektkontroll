@@ -25,6 +25,18 @@ export default function Dashboard() {
     const [inProgressActivities, setInProgressActivities] = useState<any[]>([]);
     const [updatingStatus, setUpdatingStatus] = useState<string | null>(null);
 
+    // Scroll preservation: keep the dashboard in the same spot after a status change
+    const preserveScroll = (fn: () => void) => {
+        const prevY = window.scrollY;
+        const prevDocEl = document.documentElement.scrollTop;
+        fn();
+        requestAnimationFrame(() => {
+            if (Math.abs(window.scrollY - prevY) > 4 || Math.abs(document.documentElement.scrollTop - prevDocEl) > 4) {
+                window.scrollTo({ top: prevY, behavior: 'auto' });
+            }
+        });
+    };
+
 
 
     const handleStatusChange = useCallback(async (taskId: string, newStatus: string) => {
@@ -35,9 +47,51 @@ export default function Dashboard() {
             .eq('id', taskId);
         setUpdatingStatus(null);
         if (!error) {
-            // Reload all data to reflect the change
-            loadGlobalDashboard();
-            loadInProgressActivities();
+            // Update local state in place (no full refetch — keeps the dashboard in place)
+            preserveScroll(() => {
+                setProgressAlerts(prev => {
+                    // Drop alerts for the task: when the status becomes 'completed', the
+                    // task is no longer in the .neq('status', 'completed') query, so we
+                    // remove every alert keyed on this task id. When the status changes
+                    // away from 'planned' or 'completed', the alert type may change too,
+                    // so we re-derive what should be visible.
+                    if (newStatus === 'completed') {
+                        return prev.filter(a => a.task_id !== taskId);
+                    }
+                    return prev.map(a => {
+                        if (a.task_id !== taskId) return a;
+                        // Reclassify alerts as needed
+                        if (a.type === 'late_start' || a.type === 'start') {
+                            // If task is now in_progress, these alerts should disappear
+                            if (newStatus === 'in_progress') return null as any;
+                        }
+                        // Update the status badge color via current_status
+                        return { ...a, current_status: newStatus };
+                    }).filter(Boolean);
+                });
+
+                // Sync inProgressActivities: add if becoming in_progress, remove otherwise
+                setInProgressActivities(prev => {
+                    if (newStatus === 'in_progress') {
+                        // Find the original activity from inProgressActivities (if it was already in_progress)
+                        // or fetch a fresh copy from the now-loaded data set
+                        const existing = prev.find(a => a.id === taskId);
+                        if (existing) {
+                            return prev.map(a => a.id === taskId ? { ...a, status: newStatus } : a);
+                        }
+                        // Need to fetch the activity to add to the list. Use a lightweight fetch.
+                        supabase.from('work_activities').select('*, subcontractors(company_name)').eq('id', taskId).maybeSingle()
+                            .then(({ data }) => {
+                                if (data) {
+                                    setInProgressActivities(curr => [{ ...data, status: newStatus }, ...curr]);
+                                }
+                            });
+                        return prev;
+                    } else {
+                        return prev.filter(a => a.id !== taskId);
+                    }
+                });
+            });
         }
     }, []);
 
