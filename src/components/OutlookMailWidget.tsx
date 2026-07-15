@@ -58,9 +58,20 @@ export default function OutlookMailWidget() {
     }
 
     function openOutlook() {
-        const recipients = contacts.filter(c => selectedIds.has(c.id) && c.email).map(c => c.email).join(';');
-        if (!recipients) { alert('Ingen mottakere med e-post valgt.'); return; }
-        window.location.href = `mailto:${recipients}`;
+        const recipients = contacts.filter(c => selectedIds.has(c.id) && c.email).map(c => c.email.trim()).filter(Boolean);
+        if (recipients.length === 0) { alert('Ingen mottakere med e-post valgt.'); return; }
+        const mailto = `mailto:${recipients.join(';')}`;
+        // Open via a temporary anchor so the click works reliably (and doesn't get
+        // blocked by some browsers when invoked from a non-click context).
+        const a = document.createElement('a');
+        a.href = mailto;
+        a.style.display = 'none';
+        document.body.appendChild(a);
+        a.click();
+        // Some browsers (esp. mobile) need a tick before removing the anchor.
+        setTimeout(() => {
+            if (a.parentNode) a.parentNode.removeChild(a);
+        }, 0);
     }
 
     const selectedContacts = contacts.filter(c => selectedIds.has(c.id));
@@ -86,8 +97,8 @@ export default function OutlookMailWidget() {
                 </div>
                 <div className="flex items-center gap-2">
                     {selectedIds.size > 0 && (
-                        <button onClick={() => setExpanded(!expanded)} className="px-2.5 py-1 bg-primary-50 text-primary-600 rounded-lg text-[10px] font-bold hover:bg-primary-100 transition-colors flex items-center gap-1">
-                            <Send className="w-3 h-3" /> Send
+                        <button onClick={openOutlook} className="px-2.5 py-1 bg-primary-50 text-primary-600 rounded-lg text-[10px] font-bold hover:bg-primary-100 transition-colors flex items-center gap-1" title={`Send e-post til ${selectedIds.size} mottaker(e)`}>
+                            <Send className="w-3 h-3" /> Send ({selectedIds.size})
                         </button>
                     )}
                     <button onClick={() => setExpanded(!expanded)} className="text-[10px] font-bold text-slate-400 hover:text-slate-600 uppercase tracking-widest">
