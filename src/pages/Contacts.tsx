@@ -320,6 +320,11 @@ export default function Contacts() {
                         <Plus className="w-4 h-4" /> Ny kontakt
                     </button>
                     {selectedContacts.size > 0 && (
+                        <button onClick={() => setSelectedContacts(new Set())} className="bg-slate-100 text-slate-600 px-4 py-2.5 rounded-xl font-bold text-sm flex items-center gap-2 hover:bg-slate-200 transition-colors">
+                            <X className="w-4 h-4" /> Fjern valg
+                        </button>
+                    )}
+                    {selectedContacts.size > 0 && (
                         <button onClick={handleBulkDelete} className="bg-red-600 text-white px-4 py-2.5 rounded-xl font-bold text-sm flex items-center gap-2 hover:bg-red-700 transition-colors">
                             <Trash2 className="w-4 h-4" /> Slett ({selectedContacts.size})
                         </button>

@@ -3,6 +3,7 @@ import { useSubcontractor } from '../contexts/SubcontractorContext';
 import { supabase } from '../lib/supabase';
 import { Users, Plus, X, Edit2, Trash2, ChevronLeft, ChevronRight, Clock, Settings, ClipboardList, Minus, Check, Copy, Repeat } from 'lucide-react';
 import DatePickerWithWeek from '../components/DatePickerWithWeek';
+import { toLocalDateString } from '../lib/utils';
 
 export default function Bemanning() {
     const { selectedSubcontractorId, setSelectedSubcontractorId, subcontractors } = useSubcontractor();
@@ -825,7 +826,7 @@ export default function Bemanning() {
                                 <DatePickerWithWeek
                                     selected={newManpower.date ? new Date(newManpower.date) : null}
                                     onChange={(date) => {
-                                        const newDate = date ? date.toISOString().split('T')[0] : '';
+                                        const newDate = toLocalDateString(date);
                                         setNewManpower({ ...newManpower, date: newDate, /* hours_billable removed */ });
                                     }}
                                     className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500 transition-all"
