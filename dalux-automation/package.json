@@ -1,0 +1,16 @@
+{
+  "name": "dalux-automation",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Playwright automation for the Dalux Build web client (node1).",
+  "scripts": {
+    "install:browsers": "playwright install chromium",
+    "login": "node src/login.mjs",
+    "screenshot": "node src/screenshot.mjs",
+    "codegen": "playwright codegen --load-storage=dalux-auth.json https://node1.build.dalux.com/client/725256/project-dashboard/dashboard"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.48.0"
+  }
+}

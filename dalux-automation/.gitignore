@@ -1,0 +1,20 @@
+# Dependencies
+node_modules/
+
+# Playwright browser profile (contains live session cookies) — NEVER commit
+user-data/
+
+# Saved storage state (cookies + localStorage) — NEVER commit
+dalux-auth.json
+
+# Playwright artefacts
+test-results/
+playwright-report/
+playwright/.cache/
+
+# Screenshots produced by scripts
+*.png
+
+# Local env overrides
+.env
+.env.local

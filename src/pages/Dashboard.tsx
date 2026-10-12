@@ -7,6 +7,7 @@ import CalendarWidget from '../components/CalendarWidget';
 import ManpowerWidget from '../components/ManpowerWidget';
 import ActivityRegisterWidget from '../components/ActivityRegisterWidget';
 import OutlookMailWidget from '../components/OutlookMailWidget';
+import AutomationsWidget from '../components/AutomationsWidget';
 
 
 export default function Dashboard() {
@@ -336,8 +337,13 @@ export default function Dashboard() {
                     </div>
                 </div>
 
-                {/* Right column: Calendar */}
-                <CalendarWidget />
+                {/* Right column: Calendar + Automations */}
+                <div className="flex flex-col gap-6">
+                    <div className="flex-1 min-h-0">
+                        <CalendarWidget />
+                    </div>
+                    <AutomationsWidget />
+                </div>
             </div>
 
             {/* Fremdriftsvarsler Section — Full Width */}
