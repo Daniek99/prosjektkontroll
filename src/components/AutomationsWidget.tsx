@@ -1,23 +1,33 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
     Bot,
+    Printer,
     Mail,
     FileText,
     Bell,
     Receipt,
     Workflow,
     Plus,
+    Clock,
     type LucideIcon,
 } from 'lucide-react';
+import {
+    listAutomations,
+    setAutomationEnabled,
+    readCachedAutomations,
+    type AutomationState,
+} from '../lib/automations';
 
 /**
  * Automations panel — shows which automations are active and which are not.
  *
- * Placeholder implementation:
- *  - "enabled" state is persisted to localStorage only (no backend yet).
- *  - The first automation ("Dalux-operasjoner") is the real one; its Playwright
- *    logic lives in /dalux-automation and will be wired up when the details land.
- *  - The remaining entries are placeholders for automations to come.
+ * The on/off flag is stored in Supabase (table `automations`) so the local
+ * Playwright scheduler (dalux-automation) can read it outside the browser.
+ * A localStorage cache mirrors the state for offline/fallback rendering.
+ *
+ * "Vernerunde purring" is the first real automation (Playwright, Dalux Field).
+ * It is DISABLED by default until the setup is fully complete.
+ * The remaining entries are placeholders for automations to come.
  */
 
 interface AutomationDef {
@@ -25,22 +35,32 @@ interface AutomationDef {
     name: string;
     description: string;
     icon: LucideIcon;
-    defaultEnabled: boolean;
     /** Not implemented yet — shown as "Kommer" and the toggle is disabled. */
     comingSoon?: boolean;
     /** Small badge, e.g. the engine used. */
     tag?: string;
+    /** Human-readable schedule, e.g. "Onsdager 14:00". */
+    scheduleLabel?: string;
 }
 
 const AUTOMATIONS: AutomationDef[] = [
     {
-        id: 'dalux-operations',
-        name: 'Dalux-operasjoner',
+        id: 'vernerunde-purring',
+        name: 'Vernerunde purring',
         description:
-            'Utfører automatiserte handlinger i Dalux Build via Playwright. Aktiveres når detaljene for operasjonene er klare.',
+            'Sender purring for oransje (uferdige) oppgaver i Verne- og miljørunde i Dalux Field.',
         icon: Bot,
-        defaultEnabled: false,
         tag: 'Playwright',
+        scheduleLabel: 'Onsdager 14:00',
+    },
+    {
+        id: 'vernerunde-utskrift',
+        name: 'Vernerunde utskrift',
+        description:
+            'Skriver ut Håndverkerrapport (Enkel) for nyeste vernerunde og lagrer PDF-en i HMS15 Verneprotokoll.',
+        icon: Printer,
+        tag: 'Playwright',
+        scheduleLabel: 'Tirsdager 08:00',
     },
     {
         id: 'email-reminders',
@@ -48,7 +68,6 @@ const AUTOMATIONS: AutomationDef[] = [
         description:
             'Sender automatiske påminnelser når frister og oppstarter nærmer seg.',
         icon: Mail,
-        defaultEnabled: false,
         comingSoon: true,
     },
     {
@@ -57,7 +76,6 @@ const AUTOMATIONS: AutomationDef[] = [
         description:
             'Genererer og distribuerer ukentlig fremdriftsrapport til prosjektledelsen.',
         icon: FileText,
-        defaultEnabled: false,
         comingSoon: true,
     },
     {
@@ -66,7 +84,6 @@ const AUTOMATIONS: AutomationDef[] = [
         description:
             'Varsler når underentreprenørkontrakter nærmer seg utløpsdato.',
         icon: Bell,
-        defaultEnabled: false,
         comingSoon: true,
     },
     {
@@ -75,54 +92,90 @@ const AUTOMATIONS: AutomationDef[] = [
         description:
             'Eksporterer godkjente endringsmeldinger til regnskapssystemet.',
         icon: Receipt,
-        defaultEnabled: false,
         comingSoon: true,
     },
 ];
 
-const STORAGE_KEY = 'gc_automations_state';
+const LOCAL_KEY = 'gc_automations_state';
+
+function loadLocalEnabled(): Record<string, boolean> {
+    const base: Record<string, boolean> = {};
+    AUTOMATIONS.forEach((a) => {
+        base[a.id] = false; // disabled by default
+    });
+    try {
+        const raw = window.localStorage.getItem(LOCAL_KEY);
+        if (raw) {
+            const saved = JSON.parse(raw) as Record<string, boolean>;
+            Object.keys(base).forEach((id) => {
+                if (typeof saved[id] === 'boolean') base[id] = saved[id];
+            });
+        }
+    } catch {
+        /* ignore */
+    }
+    return base;
+}
 
 export default function AutomationsWidget() {
-    const [enabled, setEnabled] = useState<Record<string, boolean>>(() => {
-        const base: Record<string, boolean> = {};
-        AUTOMATIONS.forEach((a) => {
-            base[a.id] = a.defaultEnabled;
-        });
-        try {
-            const raw = window.localStorage.getItem(STORAGE_KEY);
-            if (raw) {
-                const saved = JSON.parse(raw) as Record<string, boolean>;
-                Object.keys(base).forEach((id) => {
-                    if (typeof saved[id] === 'boolean') base[id] = saved[id];
+    const [enabled, setEnabled] = useState<Record<string, boolean>>(loadLocalEnabled);
+    const [dbRows, setDbRows] = useState<AutomationState[]>(() => readCachedAutomations() ?? []);
+    const [saving, setSaving] = useState<string | null>(null);
+
+    // Load the authoritative state from Supabase (falls back to the cache).
+    useEffect(() => {
+        let cancelled = false;
+        (async () => {
+            const { rows } = await listAutomations();
+            if (cancelled || !rows.length) return;
+            setDbRows(rows);
+            setEnabled((prev) => {
+                const next = { ...prev };
+                rows.forEach((r) => {
+                    if (typeof r.enabled === 'boolean') next[r.id] = r.enabled;
                 });
-            }
-        } catch {
-            /* ignore malformed / unavailable storage */
-        }
-        return base;
-    });
+                try {
+                    window.localStorage.setItem(LOCAL_KEY, JSON.stringify(next));
+                } catch {
+                    /* ignore */
+                }
+                return next;
+            });
+        })();
+        return () => {
+            cancelled = true;
+        };
+    }, []);
 
     useEffect(() => {
         try {
-            window.localStorage.setItem(STORAGE_KEY, JSON.stringify(enabled));
+            window.localStorage.setItem(LOCAL_KEY, JSON.stringify(enabled));
         } catch {
             /* ignore */
         }
     }, [enabled]);
 
-    const readyCount = useMemo(
-        () => AUTOMATIONS.filter((a) => !a.comingSoon).length,
-        []
-    );
+    const toggle = useCallback(async (a: AutomationDef) => {
+        if (a.comingSoon) return;
+        const next = !enabled[a.id];
+        setEnabled((prev) => ({ ...prev, [a.id]: next })); // optimistic
+        setSaving(a.id);
+        try {
+            await setAutomationEnabled(a.id, next);
+        } catch {
+            /* keep the optimistic local state; Supabase stays authoritative on next load */
+        } finally {
+            setSaving(null);
+        }
+    }, [enabled]);
+
+    const readyCount = useMemo(() => AUTOMATIONS.filter((a) => !a.comingSoon).length, []);
     const activeCount = useMemo(
         () => AUTOMATIONS.filter((a) => !a.comingSoon && enabled[a.id]).length,
         [enabled]
     );
 
-    const toggle = (a: AutomationDef) => {
-        if (a.comingSoon) return;
-        setEnabled((prev) => ({ ...prev, [a.id]: !prev[a.id] }));
-    };
+    const rowFor = (id: string) => dbRows.find((r) => r.id === id);
 
     return (
         <div className="bg-white border border-slate-200/60 rounded-3xl p-6 shadow-sm">
@@ -144,6 +197,7 @@ export default function AutomationsWidget() {
                 {AUTOMATIONS.map((a) => {
                     const isActive = !a.comingSoon && enabled[a.id];
                     const Icon = a.icon;
+                    const row = rowFor(a.id);
 
                     const rowClasses = a.comingSoon
                         ? 'border-dashed border-slate-200 bg-slate-50/50'
@@ -198,6 +252,21 @@ export default function AutomationsWidget() {
                                 <p className="text-[11px] font-medium text-slate-500 leading-snug mt-0.5 line-clamp-2">
                                     {a.description}
                                 </p>
+                                {a.scheduleLabel && (
+                                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1 flex items-center gap-1">
+                                        <Clock className="w-3 h-3" /> {a.scheduleLabel}
+                                    </p>
+                                )}
+                                {!a.comingSoon && row?.last_run_at && (
+                                    <p className="text-[10px] font-semibold text-slate-400 mt-0.5">
+                                        Sist kjørt:{' '}
+                                        {new Date(row.last_run_at).toLocaleString('no-NO', {
+                                            dateStyle: 'short',
+                                            timeStyle: 'short',
+                                        })}
+                                        {row.last_run_status ? ` — ${row.last_run_status}` : ''}
+                                    </p>
+                                )}
                             </div>
 
                             <div className="flex flex-col items-end gap-1.5 shrink-0">
@@ -212,14 +281,16 @@ export default function AutomationsWidget() {
                                     role="switch"
                                     aria-checked={isActive}
                                     aria-label={`${isActive ? 'Slå av' : 'Slå på'} ${a.name}`}
-                                    disabled={a.comingSoon}
+                                    disabled={a.comingSoon || saving === a.id}
                                     onClick={() => toggle(a)}
                                     className={`relative w-11 h-6 rounded-full transition-colors ${
                                         a.comingSoon
                                             ? 'bg-slate-200 cursor-not-allowed'
-                                            : isActive
-                                                ? 'bg-primary-500'
-                                                : 'bg-slate-300 hover:bg-slate-400'
+                                            : saving === a.id
+                                                ? 'bg-primary-300 cursor-wait'
+                                                : isActive
+                                                    ? 'bg-primary-500'
+                                                    : 'bg-slate-300 hover:bg-slate-400'
                                     }`}
                                 >
                                     <span

@@ -8,7 +8,15 @@
     "install:browsers": "playwright install chromium",
     "login": "node src/login.mjs",
     "screenshot": "node src/screenshot.mjs",
+    "dalux:purring": "node src/dalux-field-purring.mjs",
+    "dalux:print": "node src/dalux-field-print.mjs",
+    "schedule": "node src/scheduler.mjs",
     "codegen": "playwright codegen --load-storage=dalux-auth.json https://node1.build.dalux.com/client/725256/project-dashboard/dashboard"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.98.0",
+    "dotenv": "^17.3.1",
+    "node-cron": "^3.0.3"
   },
   "devDependencies": {
     "@playwright/test": "^1.48.0"

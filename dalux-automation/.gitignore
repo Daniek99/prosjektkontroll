@@ -12,6 +12,9 @@ test-results/
 playwright-report/
 playwright/.cache/
 
+# DOM dumps from DUMP=1 (may contain sensitive project data)
+debug/
+
 # Screenshots produced by scripts
 *.png
 
