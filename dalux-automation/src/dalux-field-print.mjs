@@ -251,21 +251,27 @@ async function extractReport(page) {
   });
 }
 
-/** Compose the email body in the style of the weekly vernerunde emails. */
+/**
+ * Compose the email body: greeting + overall grades, then ONLY the keywords
+ * from the main text field. The per-area section (names + grades), the
+ * "Tilbake" date, weather and next-round time are all left out.
+ */
 function buildEmailBody(report, week, year) {
   const num = (v) => (String(v ?? '').match(/\d+/) || ['?'])[0];
   const ryddighet = num(report.kv['Deltakers vurdering av ryddighet (1-7)']);
   const sikkerhet = num(report.kv['Deltakers vurdering av sikkerhet (1-7)']);
-  const neste = report.kv['Tidspunkt for neste vernerunde'] || '';
 
-  // The general note is semi-structured; break it at its known markers so the
-  // email reads like the weekly summaries (areas, focus, notices).
   let note = (report.generelt || '').replace(/^Generelt:\s*/i, '').trim();
+  // Drop the per-area section: everything from "Områder:" up to (not incl.)
+  // "Tilbake" or "Fokus på:".
+  note = note.replace(/\s*Områder:[\s\S]*?(?=\s*(?:Tilbake\s|Fokus på:))/i, '\n\n');
+  // Drop the "Tilbake <date>" marker.
+  note = note.replace(/\s*Tilbake\s+\S+\s*/i, '\n\n');
+  // Break the remaining markers onto their own lines.
   note = note
-    .replace(/\s*Områder:\s*/i, '\n\nVurdering per område:\n')
     .replace(/\s*Fokus på:\s*/i, '\n\nFokus fremover:\n')
     .replace(/\s*Til HMSkvarter:\s*/i, '\n\nTil HMSkvarter:\n')
-    .replace(/\s*Tilbake\s+/i, '\n\nTilbake ');
+    .trim();
 
   const lines = [
     'Hei,',
@@ -275,11 +281,8 @@ function buildEmailBody(report, week, year) {
     '',
     `Ryddighet: ${ryddighet}/7`,
     `Sikkerhet: ${sikkerhet}/7`,
-    '',
   ];
-  if (note) lines.push(note);
-  if (report.weather) lines.push('', `Værforhold: ${report.weather}`);
-  if (neste) lines.push('', `Neste vernerunde: ${neste}`);
+  if (note) lines.push('', note);
   lines.push('', 'Mvh', EMAIL_FROM_NAME, 'Veidekke Entreprenør AS');
   return lines.join('\n');
 }
