@@ -205,8 +205,17 @@ npm run dalux:print              # generates and saves the PDF
 ```
 
 - The PDF is captured via Playwright's download event (with a new-tab fallback) and
-  saved directly — no manual "Save as" dialog.
+  saved directly — no manual "Save as" dialog. Locked files (PDF open in a viewer)
+  are retried for ~5 minutes.
 - The save folder and filename prefix are configurable: `PRINT_SAVE_DIR`, `FILE_PREFIX`.
+
+**Email draft (same automation):** after the PDF is saved, the report content is
+extracted (grades, per-area assessments, focus, notices, weather, next round),
+the recipients are pulled from the **"Vernerunde"** category in the `contacts`
+table, and a draft `.eml` (From: `daniel.ekman@veidekke.com`, To: all recipients,
+with the PDF attached) is written next to the PDF and opened in the default mail
+client for review — **nothing is sent automatically**. Configurable: `EMAIL_FROM`,
+`EMAIL_CATEGORY`, `EMAIL_PROJECT`.
 
 ---
 

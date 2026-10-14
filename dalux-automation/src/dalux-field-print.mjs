@@ -1,7 +1,8 @@
 // src/dalux-field-print.mjs
 //
 // Automation: print the newest "Verne- og miljørunde" checklist as a
-// Håndverkerrapport (Enkel) PDF and save it locally.
+// Håndverkerrapport (Enkel) PDF, save it locally — and draft the follow-up
+// email for the round.
 //
 // VERIFIED FLOW (selectors captured from the live app):
 //   Dashboard -> Field -> Sjekklister -> 22. HMS -> Til verneleder
@@ -11,8 +12,18 @@
 //   3. Tick "Ta med oppgaver".
 //   4. Click the "Håndverkerrapport" card (dlx-field-print-button).
 //   5. Tick "Enkel"  (data-cy="checkbox-component-Enkel").
-//   6. "Skriv ut" -> the report is generated -> "Åpne" -> the PDF downloads.
+//   6. "Skriv ut" -> the report is generated -> "Åpne" (data-cy
+//      "progress-open-btn"; present but DISABLED while generating) -> download.
 //   7. Save it as  Vernerunde uke <ISO week> <year>.pdf  in the HMS15 folder.
+//
+// EMAIL DRAFT (same automation, after the PDF is saved):
+//   - Content is extracted from the checklist window: the key/value answer
+//     rows (grades, weather, next round) and the "Generelt:" note.
+//   - Recipients: every contact in the "Vernerunde" category (Supabase
+//     `contacts` table).
+//   - A standards-compliant draft .eml (From / To / subject / body + the PDF
+//     attached) is written next to the PDF and opened in the default mail
+//     client (Outlook) for review — nothing is sent automatically.
 //
 // Run:
 //   npm run dalux:print
@@ -22,11 +33,19 @@
 // Only use against an account you are authorised to access, within Dalux's ToS.
 
 import { chromium } from '@playwright/test';
+import { createClient } from '@supabase/supabase-js';
+import { spawn } from 'node:child_process';
 import path from 'node:path';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import dotenv from 'dotenv';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+// Load credentials: the app's .env.local (one level up) and any local .env here.
+dotenv.config({ path: path.join(__dirname, '..', '..', '.env.local') });
+dotenv.config({ path: path.join(__dirname, '..', '.env') });
+dotenv.config();
 
 // ── Config ────────────────────────────────────────────────────────────────────
 const FIELD_URL =
@@ -46,6 +65,17 @@ const SAVE_DIR =
   process.env.PRINT_SAVE_DIR ||
   'C:\\Users\\NO-daek\\Veidekke\\OBOS - Hammersborg torg - General\\HMS\\HMS15 Verneprotokoll';
 const FILE_PREFIX = 'Vernerunde uke';
+
+// Email draft settings.
+const EMAIL_FROM = process.env.EMAIL_FROM || 'daniel.ekman@veidekke.com';
+const EMAIL_FROM_NAME = process.env.EMAIL_FROM_NAME || 'Daniel Ekman';
+const EMAIL_CATEGORY = process.env.EMAIL_CATEGORY || 'Vernerunde';
+const EMAIL_PROJECT = process.env.EMAIL_PROJECT || 'Hammersborg Torg';
+
+const SUPABASE_URL = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || '';
+const SERVICE_KEY =
+  process.env.VITE_SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+const ANON_KEY = process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || '';
 
 const DRY_RUN = process.env.DRY_RUN === '1';
 const HEADLESS = process.env.HEADLESS === '1';
@@ -190,6 +220,170 @@ async function tickPrintOption(page, label) {
   log(`ticked "${label}"`);
 }
 
+// ── Email draft ───────────────────────────────────────────────────────────────
+
+/** Key/value answers + free text from the (still open) checklist window. */
+async function extractReport(page) {
+  return await page.evaluate(() => {
+    const wins = Array.from(document.querySelectorAll('.dialog-window')).filter((w) => {
+      const r = w.getBoundingClientRect();
+      return r.width > 0 && w.querySelector('dlx-field-report-two-columns');
+    });
+    const win = wins[0];
+    if (!win) return { kv: {}, generelt: '', weather: '' };
+    const kv = {};
+    // Report item rows: [data-cy="report-item-N"] -> .keyColumn label +
+    // [data-cy="checklist-report-item-value"] value (grades, weather, etc.).
+    for (const row of win.querySelectorAll('[data-cy^="report-item-"]')) {
+      const label = row.querySelector('.keyColumn .reportComment');
+      const value = row.querySelector('[data-cy="checklist-report-item-value"]');
+      if (!label || !value) continue;
+      const key = (label.innerText || '').trim().replace(/\s+/g, ' ');
+      const val = (value.innerText || '').trim().replace(/\s+/g, ' ');
+      if (key && val) kv[key] = val;
+    }
+    const texts = Array.from(win.querySelectorAll('.selectable-text'))
+      .map((n) => (n.innerText || '').trim().replace(/\s+/g, ' '))
+      .filter(Boolean);
+    const generelt = texts.find((t) => /^Generelt:/i.test(t)) || '';
+    const weather = kv['Værforhold'] || texts.find((t) => /°C|fuktighet/i.test(t)) || '';
+    return { kv, generelt, weather };
+  });
+}
+
+/** Compose the email body in the style of the weekly vernerunde emails. */
+function buildEmailBody(report, week, year) {
+  const num = (v) => (String(v ?? '').match(/\d+/) || ['?'])[0];
+  const ryddighet = num(report.kv['Deltakers vurdering av ryddighet (1-7)']);
+  const sikkerhet = num(report.kv['Deltakers vurdering av sikkerhet (1-7)']);
+  const neste = report.kv['Tidspunkt for neste vernerunde'] || '';
+
+  // The general note is semi-structured; break it at its known markers so the
+  // email reads like the weekly summaries (areas, focus, notices).
+  let note = (report.generelt || '').replace(/^Generelt:\s*/i, '').trim();
+  note = note
+    .replace(/\s*Områder:\s*/i, '\n\nVurdering per område:\n')
+    .replace(/\s*Fokus på:\s*/i, '\n\nFokus fremover:\n')
+    .replace(/\s*Til HMSkvarter:\s*/i, '\n\nTil HMSkvarter:\n')
+    .replace(/\s*Tilbake\s+/i, '\n\nTilbake ');
+
+  const lines = [
+    'Hei,',
+    '',
+    `Se vedlagt referat fra ukens vernerunde (${EMAIL_PROJECT}, uke ${week} ${year}).`,
+    'Karakterer for ryddighet og sikkerhet er satt som følger:',
+    '',
+    `Ryddighet: ${ryddighet}/7`,
+    `Sikkerhet: ${sikkerhet}/7`,
+    '',
+  ];
+  if (note) lines.push(note);
+  if (report.weather) lines.push('', `Værforhold: ${report.weather}`);
+  if (neste) lines.push('', `Neste vernerunde: ${neste}`);
+  lines.push('', 'Mvh', EMAIL_FROM_NAME, 'Veidekke Entreprenør AS');
+  return lines.join('\n');
+}
+
+/** Recipients: all contacts in the given category (Supabase `contacts`). */
+async function getRecipients() {
+  if (!SUPABASE_URL || !(SERVICE_KEY || ANON_KEY)) {
+    throw new Error('missing Supabase credentials for the contacts lookup');
+  }
+  const supabase = createClient(SUPABASE_URL, SERVICE_KEY || ANON_KEY, {
+    auth: { persistSession: false },
+  });
+  const { data, error } = await supabase
+    .from('contacts')
+    .select('name,email')
+    .eq('category', EMAIL_CATEGORY)
+    .order('name');
+  if (error) throw new Error(`contacts: ${error.message}`);
+  return (data || []).filter((c) => (c.email || '').trim());
+}
+
+/** Write a standards-compliant .eml (text + PDF attachment) with CRLF endings. */
+function writeEml({ from, fromName, to, subject, body, pdfPath, outPath }) {
+  const boundary = '----=_VernerundeDraft';
+  const b64 = (buf) => buf.toString('base64').replace(/(.{76})/g, '$1\r\n');
+  const pdfBuf = fs.readFileSync(pdfPath);
+  const pdfName = path.basename(pdfPath);
+  const lines = [
+    `From: ${fromName} <${from}>`,
+    `To: ${to.join(',\r\n ')}`,
+    `Subject: ${subject}`,
+    `Date: ${new Date().toUTCString()}`,
+    'MIME-Version: 1.0',
+    `Content-Type: multipart/mixed; boundary="${boundary}"`,
+    '',
+    `--${boundary}`,
+    'Content-Type: text/plain; charset=UTF-8',
+    'Content-Transfer-Encoding: base64',
+    '',
+    b64(Buffer.from(body, 'utf8')),
+    `--${boundary}`,
+    `Content-Type: application/pdf; name="${pdfName}"`,
+    'Content-Transfer-Encoding: base64',
+    `Content-Disposition: attachment; filename="${pdfName}"`,
+    '',
+    b64(pdfBuf),
+    `--${boundary}--`,
+    '',
+  ];
+  fs.writeFileSync(outPath, lines.join('\r\n'), 'binary');
+}
+
+/**
+ * Write a file, retrying while Windows reports EBUSY/EPERM — happens when the
+ * PDF is open in a viewer (Acrobat/Edge lock files). Waits up to ~5 minutes.
+ */
+async function writeFileWithRetry(buf, target, page) {
+  for (let i = 0; ; i++) {
+    try {
+      fs.writeFileSync(target, buf);
+      return;
+    } catch (e) {
+      if (!['EBUSY', 'EPERM'].includes(e.code) || i >= 60) {
+        throw new Error(
+          `could not write "${target}" — ${e.code || e.message}. ` +
+            'Close the PDF in any viewer and run again.'
+        );
+      }
+      if (i === 0) log('file locked (open in a viewer?) — retrying…');
+      await page.waitForTimeout(5000);
+    }
+  }
+}
+
+/** Draft the email: extract content, gather recipients, write + open the .eml. */
+async function createEmailDraft(page, pdfPath, { week, year }) {
+  const report = await extractReport(page);
+  log('extracted report content');
+
+  const recipients = await getRecipients();
+  if (!recipients.length) throw new Error(`no recipients in category "${EMAIL_CATEGORY}"`);
+  log(`recipients: ${recipients.length} (category "${EMAIL_CATEGORY}")`);
+
+  const subject = `${FILE_PREFIX} ${week} ${year} - ${EMAIL_PROJECT}`;
+  const body = buildEmailBody(report, week, year);
+  const outPath = path.join(SAVE_DIR, `${FILE_PREFIX} ${week} ${year} - epost.eml`);
+  writeEml({
+    from: EMAIL_FROM,
+    fromName: EMAIL_FROM_NAME,
+    to: recipients.map((r) => r.email.trim()),
+    subject,
+    body,
+    pdfPath,
+    outPath,
+  });
+  log(`email draft written: ${outPath}`);
+
+  // Open it in the default mail client (Outlook) as an editable draft.
+  spawn('cmd', ['/c', 'start', '', outPath], { detached: true, stdio: 'ignore' }).unref();
+  return outPath;
+}
+
+// ── Main ──────────────────────────────────────────────────────────────────────
+
 async function main() {
   const context = await chromium.launchPersistentContext(USER_DATA_DIR, {
     headless: HEADLESS,
@@ -273,7 +467,16 @@ async function main() {
 
   const download = await downloadPromise;
   if (download) {
-    await download.saveAs(target);
+    for (let i = 0; ; i++) {
+      try {
+        await download.saveAs(target);
+        break;
+      } catch (e) {
+        if (!['EBUSY', 'EPERM'].includes(e.code) || i >= 12) throw e;
+        if (i === 0) log('file locked (open in a viewer?) — retrying…');
+        await page.waitForTimeout(5000);
+      }
+    }
     log(`saved: ${target}`);
   } else {
     // The PDF may open in a new tab instead of triggering a download.
@@ -282,18 +485,25 @@ async function main() {
     const response = await popup
       .waitForResponse((r) => (r.headers()['content-type'] || '').includes('pdf'), { timeout: 30000 })
       .catch(() => null);
-    if (response) {
-      fs.writeFileSync(target, await response.body());
-    } else {
-      const res = await page.request.get(popup.url());
-      fs.writeFileSync(target, await res.body());
-    }
+    const body = response
+      ? await response.body()
+      : await (await page.request.get(popup.url())).body();
     await popup.close().catch(() => {});
+    await writeFileWithRetry(body, target, page);
     log(`saved from new tab: ${target}`);
   }
 
+  // ── Email draft (same automation) ───────────────────────────────────────────
+  // The checklist window is still open here, so its content can be extracted.
+  let draft = null;
+  try {
+    draft = await createEmailDraft(page, target, { week, year });
+  } catch (e) {
+    console.error(`  email draft failed: ${e.message.split('\n')[0]}`);
+  }
+
   await closeTopWindow(page, 0);
-  console.log(`\nDone. Saved "${fileName}" to ${SAVE_DIR}\n`);
+  console.log(`\nDone. Saved "${fileName}" to ${SAVE_DIR}${draft ? `\nEmail draft: ${draft}` : ''}\n`);
   await context.close();
 }
 
