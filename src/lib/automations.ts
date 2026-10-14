@@ -18,6 +18,7 @@ export interface AutomationState {
     schedule: string;
     last_run_at: string | null;
     last_run_status: string | null;
+    run_requested_at: string | null;
     updated_at: string;
 }
 
@@ -62,4 +63,17 @@ export async function setAutomationEnabled(id: string, enabled: boolean): Promis
     if (cached) {
         writeCache(cached.map((r) => (r.id === id ? { ...r, enabled } : r)));
     }
+}
+
+/**
+ * Ask the local scheduler to run this automation immediately, bypassing the
+ * cron schedule. The scheduler polls for `run_requested_at`, clears it and
+ * executes the script.
+ */
+export async function requestAutomationRun(id: string): Promise<void> {
+    const { error } = await supabase
+        .from('automations')
+        .update({ run_requested_at: new Date().toISOString() })
+        .eq('id', id);
+    if (error) throw error;
 }

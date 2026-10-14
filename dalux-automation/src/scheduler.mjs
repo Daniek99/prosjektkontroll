@@ -1,10 +1,12 @@
 // src/scheduler.mjs
 //
-// Runs the Dalux automations on their schedules.
+// Runs the Dalux automations on their schedules — and immediately when the
+// user presses "Kjør nå" in the app.
 //
-// The on/off flags live in Supabase (table `automations`) so they can be
-// controlled from the web app's Automations panel on the homepage. This
-// process only fires a script when its automation is ENABLED.
+// The on/off flags and run requests live in Supabase (table `automations`) so
+// they can be controlled from the web app's Automations panel on the homepage.
+// This process only fires a script when its automation is ENABLED, or when a
+// run has been explicitly requested from the app.
 //
 // Registered automations (id -> script):
 //   vernerunde-purring   -> dalux-field-purring.mjs   (Wed 14:00)
@@ -37,6 +39,9 @@ const AUTOMATION_REGISTRY = [
   { id: 'vernerunde-purring', script: 'dalux-field-purring.mjs' },
   { id: 'vernerunde-utskrift', script: 'dalux-field-print.mjs' },
 ];
+
+// How often to check for "Kjør nå" requests from the app.
+const POLL_MS = Number(process.env.POLL_MS || 20000);
 
 const SUPABASE_URL = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || '';
 const SERVICE_KEY =
@@ -93,34 +98,70 @@ function runScript(script) {
   });
 }
 
+/** Run one automation end-to-end and record the result. */
+async function runEntry(entry, row, reason) {
+  if (running.has(entry.id)) {
+    console.log(`[${entry.id}] previous run still in progress — skipping (${reason}).`);
+    return;
+  }
+  running.add(entry.id);
+  try {
+    console.log(
+      `\n=== [${entry.id}] Running "${row.name}" (${reason}) at ${new Date().toLocaleString('no-NO')} ===`
+    );
+    const code = await runScript(entry.script);
+    await markRun(entry.id, code === 0 ? 'OK' : `Feilet (kode ${code})`);
+    console.log(`=== [${entry.id}] Finished (exit code ${code}) ===`);
+  } catch (e) {
+    console.error(`[${entry.id}] run failed:`, e.message);
+    await markRun(entry.id, `Feilet: ${e.message}`).catch(() => {});
+  } finally {
+    running.delete(entry.id);
+  }
+}
+
+/** Cron tick: only runs when the automation is enabled. */
 function makeTick(entry) {
   return async function tick() {
-    if (running.has(entry.id)) {
-      console.log(`[${entry.id}] previous run still in progress — skipping.`);
+    const row = await getAutomation(entry.id);
+    if (!row) {
+      console.log(`[${entry.id}] no automation row — nothing to do.`);
       return;
     }
-    running.add(entry.id);
-    try {
-      const row = await getAutomation(entry.id);
-      if (!row) {
-        console.log(`[${entry.id}] no automation row — nothing to do.`);
-        return;
-      }
-      if (!row.enabled) {
-        console.log(`[${new Date().toLocaleString('no-NO')}] "${row.name}" is disabled — skipping.`);
-        return;
-      }
-      console.log(`\n=== [${entry.id}] Running "${row.name}" at ${new Date().toLocaleString('no-NO')} ===`);
-      const code = await runScript(entry.script);
-      await markRun(entry.id, code === 0 ? 'OK' : `Feilet (kode ${code})`);
-      console.log(`=== [${entry.id}] Finished (exit code ${code}) ===`);
-    } catch (e) {
-      console.error(`[${entry.id}] tick failed:`, e.message);
-      await markRun(entry.id, `Feilet: ${e.message}`).catch(() => {});
-    } finally {
-      running.delete(entry.id);
+    if (!row.enabled) {
+      console.log(`[${new Date().toLocaleString('no-NO')}] "${row.name}" is disabled — skipping.`);
+      return;
     }
+    await runEntry(entry, row, 'cron');
   };
+}
+
+/**
+ * "Kjør nå" from the app: the widget sets `run_requested_at`; we clear it and
+ * run immediately. This bypasses the schedule AND the enabled flag — it is an
+ * explicit user action.
+ */
+async function pollRunRequests() {
+  for (const entry of AUTOMATION_REGISTRY) {
+    let row;
+    try {
+      row = await getAutomation(entry.id);
+    } catch {
+      continue;
+    }
+    if (!row?.run_requested_at) continue;
+
+    // Clear the request first so a long run can't be triggered twice.
+    const { error } = await supabase
+      .from('automations')
+      .update({ run_requested_at: null })
+      .eq('id', entry.id);
+    if (error) {
+      console.error(`[${entry.id}] failed to clear run request:`, error.message);
+      continue;
+    }
+    await runEntry(entry, row, 'manuell "Kjør nå"');
+  }
 }
 
 const ONCE = process.argv.includes('--once');
@@ -142,8 +183,11 @@ for (const entry of AUTOMATION_REGISTRY) {
 }
 
 if (ONCE) {
+  await pollRunRequests(); // also honour any pending "Kjør nå"
   console.log('\n(--once) done.');
   process.exit(0);
 }
 
-console.log('\nScheduler running. Keep this process open (or use --once from Task Scheduler).');
+setInterval(pollRunRequests, POLL_MS).unref();
+console.log(`\nScheduler running. "Kjør nå" requests are polled every ${POLL_MS / 1000}s.`);
+console.log('Keep this process open (or use --once from Task Scheduler).');

@@ -9,11 +9,13 @@ import {
     Workflow,
     Plus,
     Clock,
+    Play,
     type LucideIcon,
 } from 'lucide-react';
 import {
     listAutomations,
     setAutomationEnabled,
+    requestAutomationRun,
     readCachedAutomations,
     type AutomationState,
 } from '../lib/automations';
@@ -25,9 +27,13 @@ import {
  * Playwright scheduler (dalux-automation) can read it outside the browser.
  * A localStorage cache mirrors the state for offline/fallback rendering.
  *
- * "Vernerunde purring" is the first real automation (Playwright, Dalux Field).
- * It is DISABLED by default until the setup is fully complete.
- * The remaining entries are placeholders for automations to come.
+ * "Kjør nå" asks the scheduler to run the automation immediately, bypassing
+ * the cron schedule. The scheduler polls for `run_requested_at`, clears it
+ * and executes the script — so the scheduler process must be running.
+ *
+ * "Vernerunde purring" and "Vernerunde utskrift" are real automations
+ * (Playwright, Dalux Field). They are DISABLED by default until the setup is
+ * fully complete. The remaining entries are placeholders for automations to come.
  */
 
 interface AutomationDef {
@@ -121,6 +127,7 @@ export default function AutomationsWidget() {
     const [enabled, setEnabled] = useState<Record<string, boolean>>(loadLocalEnabled);
     const [dbRows, setDbRows] = useState<AutomationState[]>(() => readCachedAutomations() ?? []);
     const [saving, setSaving] = useState<string | null>(null);
+    const [requesting, setRequesting] = useState<string | null>(null);
 
     // Load the authoritative state from Supabase (falls back to the cache).
     useEffect(() => {
@@ -155,19 +162,35 @@ export default function AutomationsWidget() {
         }
     }, [enabled]);
 
-    const toggle = useCallback(async (a: AutomationDef) => {
+    const toggle = useCallback(
+        async (a: AutomationDef) => {
+            if (a.comingSoon) return;
+            const next = !enabled[a.id];
+            setEnabled((prev) => ({ ...prev, [a.id]: next })); // optimistic
+            setSaving(a.id);
+            try {
+                await setAutomationEnabled(a.id, next);
+            } catch {
+                /* keep the optimistic local state; Supabase stays authoritative on next load */
+            } finally {
+                setSaving(null);
+            }
+        },
+        [enabled]
+    );
+
+    /** Ask the local scheduler to run this automation right away. */
+    const runNow = useCallback(async (a: AutomationDef) => {
         if (a.comingSoon) return;
-        const next = !enabled[a.id];
-        setEnabled((prev) => ({ ...prev, [a.id]: next })); // optimistic
-        setSaving(a.id);
+        setRequesting(a.id);
         try {
-            await setAutomationEnabled(a.id, next);
+            await requestAutomationRun(a.id);
         } catch {
-            /* keep the optimistic local state; Supabase stays authoritative on next load */
+            /* ignore */
         } finally {
-            setSaving(null);
+            setRequesting(null);
         }
-    }, [enabled]);
+    }, []);
 
     const readyCount = useMemo(() => AUTOMATIONS.filter((a) => !a.comingSoon).length, []);
     const activeCount = useMemo(
@@ -269,36 +292,51 @@ export default function AutomationsWidget() {
                                 )}
                             </div>
 
-                            <div className="flex flex-col items-end gap-1.5 shrink-0">
-                                <span
-                                    className={`text-[9px] font-extrabold uppercase tracking-widest px-2 py-0.5 rounded-full ${statusClasses}`}
-                                >
-                                    {statusLabel}
-                                </span>
+                            <div className="flex items-center gap-2 shrink-0">
+                                {!a.comingSoon && (
+                                    <button
+                                        type="button"
+                                        onClick={() => runNow(a)}
+                                        disabled={requesting === a.id}
+                                        title="Kjør automasjonen nå (krever at scheduleren kjører)"
+                                        className="px-2 py-1 text-[10px] font-extrabold uppercase tracking-widest rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-100 transition-colors disabled:opacity-50 disabled:cursor-wait flex items-center gap-1"
+                                    >
+                                        <Play className="w-3 h-3" />
+                                        {requesting === a.id ? 'Kjører…' : 'Kjør nå'}
+                                    </button>
+                                )}
 
-                                <button
-                                    type="button"
-                                    role="switch"
-                                    aria-checked={isActive}
-                                    aria-label={`${isActive ? 'Slå av' : 'Slå på'} ${a.name}`}
-                                    disabled={a.comingSoon || saving === a.id}
-                                    onClick={() => toggle(a)}
-                                    className={`relative w-11 h-6 rounded-full transition-colors ${
-                                        a.comingSoon
-                                            ? 'bg-slate-200 cursor-not-allowed'
-                                            : saving === a.id
-                                                ? 'bg-primary-300 cursor-wait'
-                                                : isActive
-                                                    ? 'bg-primary-500'
-                                                    : 'bg-slate-300 hover:bg-slate-400'
-                                    }`}
-                                >
+                                <div className="flex flex-col items-end gap-1.5">
                                     <span
-                                        className={`absolute top-1 left-1 w-4 h-4 rounded-full bg-white shadow transition-transform ${
-                                            isActive ? 'translate-x-5' : 'translate-x-0'
+                                        className={`text-[9px] font-extrabold uppercase tracking-widest px-2 py-0.5 rounded-full ${statusClasses}`}
+                                    >
+                                        {statusLabel}
+                                    </span>
+
+                                    <button
+                                        type="button"
+                                        role="switch"
+                                        aria-checked={isActive}
+                                        aria-label={`${isActive ? 'Slå av' : 'Slå på'} ${a.name}`}
+                                        disabled={a.comingSoon || saving === a.id}
+                                        onClick={() => toggle(a)}
+                                        className={`relative w-11 h-6 rounded-full transition-colors ${
+                                            a.comingSoon
+                                                ? 'bg-slate-200 cursor-not-allowed'
+                                                : saving === a.id
+                                                    ? 'bg-primary-300 cursor-wait'
+                                                    : isActive
+                                                        ? 'bg-primary-500'
+                                                        : 'bg-slate-300 hover:bg-slate-400'
                                         }`}
-                                    />
-                                </button>
+                                    >
+                                        <span
+                                            className={`absolute top-1 left-1 w-4 h-4 rounded-full bg-white shadow transition-transform ${
+                                                isActive ? 'translate-x-5' : 'translate-x-0'
+                                            }`}
+                                        />
+                                    </button>
+                                </div>
                             </div>
                         </div>
                     );

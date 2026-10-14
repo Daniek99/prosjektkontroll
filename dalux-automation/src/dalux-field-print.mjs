@@ -262,11 +262,14 @@ async function main() {
   await openWindows(page).last().getByRole('button', { name: /^skriv ut$/i }).first().click({ timeout: 8000 });
   log('generating report…');
 
-  // Wait for the file to be ready, then press "Åpne".
-  const openBtn = page.getByRole('button', { name: /^åpne$/i }).first();
+  // Wait for the file to be ready, then press "Åpne". The button (data-cy
+  // "progress-open-btn") is present but DISABLED while the report generates —
+  // click() keeps retrying until it becomes enabled.
+  const openBtn = page.locator('[data-cy="progress-open-btn"]').first();
   await openBtn.waitFor({ state: 'visible', timeout: 180000 });
-  log('file ready — pressing "Åpne"');
-  await openBtn.click({ timeout: 8000 });
+  log('file ready — waiting for the report to finish generating…');
+  await openBtn.click({ timeout: 180000 });
+  log('pressed "Åpne"');
 
   const download = await downloadPromise;
   if (download) {

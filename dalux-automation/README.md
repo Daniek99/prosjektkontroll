@@ -160,6 +160,12 @@ npm run schedule                 # resident scheduler: fires on the cron schedul
 node src/scheduler.mjs --once    # run one tick now and exit (also for Task Scheduler)
 ```
 
+**"Kjør nå"** in the app: the button next to each automation sets
+`run_requested_at` in Supabase. The scheduler polls for it every ~20 s
+(`POLL_MS`), clears it and runs the script immediately — bypassing both the
+schedule and the enabled flag (it is an explicit user action). The scheduler
+process must be running for it to work.
+
 - Each automation's cron is stored in its `automations` row (local time).
 - On each tick the scheduler reads `enabled`; if it is off, nothing runs.
 - When it runs, the Playwright script starts with `AUTO=1` (no confirmation prompt)
