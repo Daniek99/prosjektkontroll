@@ -210,12 +210,13 @@ npm run dalux:print              # generates and saves the PDF
 - The save folder and filename prefix are configurable: `PRINT_SAVE_DIR`, `FILE_PREFIX`.
 
 **Email draft (same automation):** after the PDF is saved, the report content is
-extracted (grades, per-area assessments, focus, notices, weather, next round),
-the recipients are pulled from the **"Vernerunde"** category in the `contacts`
-table, and a draft `.eml` (From: `daniel.ekman@veidekke.com`, To: all recipients,
-with the PDF attached) is written next to the PDF and opened in the default mail
-client for review — **nothing is sent automatically**. Configurable: `EMAIL_FROM`,
-`EMAIL_CATEGORY`, `EMAIL_PROJECT`.
+extracted (the overall grades plus the keywords from the main text field), the
+recipients are pulled from the **"Vernerunde"** category in the `contacts` table,
+and a draft is created **in the Outlook Drafts folder** — via COM automation
+(`scripts/outlook-draft.ps1`), so it is **never sent** — with the PDF attached.
+If Outlook isn't available, a `.eml` is written next to the PDF instead.
+Configurable: `EMAIL_FROM` (default `daniel.ekman@veidekke.no`), `EMAIL_CATEGORY`,
+`EMAIL_PROJECT`.
 
 ---
 

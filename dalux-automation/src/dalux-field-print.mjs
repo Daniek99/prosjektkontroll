@@ -34,7 +34,7 @@
 
 import { chromium } from '@playwright/test';
 import { createClient } from '@supabase/supabase-js';
-import { spawn } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -67,7 +67,7 @@ const SAVE_DIR =
 const FILE_PREFIX = 'Vernerunde uke';
 
 // Email draft settings.
-const EMAIL_FROM = process.env.EMAIL_FROM || 'daniel.ekman@veidekke.com';
+const EMAIL_FROM = process.env.EMAIL_FROM || 'daniel.ekman@veidekke.no';
 const EMAIL_FROM_NAME = process.env.EMAIL_FROM_NAME || 'Daniel Ekman';
 const EMAIL_CATEGORY = process.env.EMAIL_CATEGORY || 'Vernerunde';
 const EMAIL_PROJECT = process.env.EMAIL_PROJECT || 'Hammersborg Torg';
@@ -357,7 +357,27 @@ async function writeFileWithRetry(buf, target, page) {
   }
 }
 
-/** Draft the email: extract content, gather recipients, write + open the .eml. */
+/**
+ * Create a draft in the local Outlook profile's Drafts folder (never sent) via
+ * COM automation. Throws if Outlook isn't available.
+ */
+function createOutlookDraft({ to, subject, body, attachment }) {
+  const tmpJson = path.join(DEBUG_DIR, 'outlook-draft.json');
+  fs.mkdirSync(DEBUG_DIR, { recursive: true });
+  fs.writeFileSync(tmpJson, JSON.stringify({ to, subject, body, attachment }, null, 2), 'utf8');
+  const ps1 = path.join(__dirname, '..', 'scripts', 'outlook-draft.ps1');
+  const res = spawnSync(
+    'powershell',
+    ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ps1, tmpJson],
+    { encoding: 'utf8' }
+  );
+  const out = `${res.stdout || ''}${res.stderr || ''}`;
+  if (res.status !== 0 || !/DRAFT_SAVED/.test(out)) {
+    throw new Error((out.trim().split('\n').pop() || 'powershell failed').slice(0, 200));
+  }
+}
+
+/** Draft the email: extract content, gather recipients, save as an Outlook draft. */
 async function createEmailDraft(page, pdfPath, { week, year }) {
   const report = await extractReport(page);
   log('extracted report content');
@@ -368,21 +388,22 @@ async function createEmailDraft(page, pdfPath, { week, year }) {
 
   const subject = `${FILE_PREFIX} ${week} ${year} - ${EMAIL_PROJECT}`;
   const body = buildEmailBody(report, week, year);
-  const outPath = path.join(SAVE_DIR, `${FILE_PREFIX} ${week} ${year} - epost.eml`);
-  writeEml({
-    from: EMAIL_FROM,
-    fromName: EMAIL_FROM_NAME,
-    to: recipients.map((r) => r.email.trim()),
-    subject,
-    body,
-    pdfPath,
-    outPath,
-  });
-  log(`email draft written: ${outPath}`);
+  const to = recipients.map((r) => r.email.trim());
 
-  // Open it in the default mail client (Outlook) as an editable draft.
-  spawn('cmd', ['/c', 'start', '', outPath], { detached: true, stdio: 'ignore' }).unref();
-  return outPath;
+  // Preferred: a real draft in the Outlook Drafts folder (never sent).
+  try {
+    createOutlookDraft({ to, subject, body, attachment: pdfPath });
+    log('saved as a draft in Outlook (Drafts folder) — not sent');
+    return { kind: 'outlook', path: null };
+  } catch (e) {
+    log(`Outlook draft unavailable (${e.message}) — writing a .eml instead`);
+  }
+
+  // Fallback: a .eml file next to the PDF (not opened automatically).
+  const outPath = path.join(SAVE_DIR, `${FILE_PREFIX} ${week} ${year} - epost.eml`);
+  writeEml({ from: EMAIL_FROM, fromName: EMAIL_FROM_NAME, to, subject, body, pdfPath, outPath });
+  log(`email draft written: ${outPath}`);
+  return { kind: 'eml', path: outPath };
 }
 
 // ── Main ──────────────────────────────────────────────────────────────────────
@@ -506,7 +527,12 @@ async function main() {
   }
 
   await closeTopWindow(page, 0);
-  console.log(`\nDone. Saved "${fileName}" to ${SAVE_DIR}${draft ? `\nEmail draft: ${draft}` : ''}\n`);
+  const draftMsg = draft
+    ? draft.kind === 'outlook'
+      ? '\nEmail draft: saved in Outlook → Drafts (not sent)'
+      : `\nEmail draft: ${draft.path}`
+    : '';
+  console.log(`\nDone. Saved "${fileName}" to ${SAVE_DIR}${draftMsg}\n`);
   await context.close();
 }
 
