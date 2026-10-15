@@ -10,6 +10,7 @@ import {
     Plus,
     Clock,
     Play,
+    Loader2,
     type LucideIcon,
 } from 'lucide-react';
 import {
@@ -28,8 +29,12 @@ import {
  * A localStorage cache mirrors the state for offline/fallback rendering.
  *
  * "Kjør nå" asks the scheduler to run the automation immediately, bypassing
- * the cron schedule. The scheduler polls for `run_requested_at`, clears it
- * and executes the script — so the scheduler process must be running.
+ * the cron schedule. The scheduler polls for `run_requested_at`, clears it and
+ * executes the script — so the scheduler process must be running.
+ *
+ * Live progress: the scheduler writes `run_status` (queued → running → done |
+ * failed) and `run_progress` (the latest line from the script) to the row; this
+ * panel polls for it so you can see what is currently running.
  *
  * "Vernerunde purring" and "Vernerunde utskrift" are real automations
  * (Playwright, Dalux Field). They are DISABLED by default until the setup is
@@ -63,7 +68,7 @@ const AUTOMATIONS: AutomationDef[] = [
         id: 'vernerunde-utskrift',
         name: 'Vernerunde utskrift',
         description:
-            'Skriver ut Håndverkerrapport (Enkel) for nyeste vernerunde og lagrer PDF-en i HMS15 Verneprotokoll.',
+            'Skriver ut Håndverkerrapport (Enkel) for nyeste vernerunde, lagrer PDF-en i HMS15 Verneprotokoll og lager e-postutkast.',
         icon: Printer,
         tag: 'Playwright',
         scheduleLabel: 'Tirsdager 08:00',
@@ -96,13 +101,14 @@ const AUTOMATIONS: AutomationDef[] = [
         id: 'invoice-export',
         name: 'Fakturaeksport',
         description:
-            'Eksporterer godkjente endringsmeldinger til regnskapssystemet.',
+            'Eksporterer godkjendte endringsmeldinger til regnskapssystemet.',
         icon: Receipt,
         comingSoon: true,
     },
 ];
 
 const LOCAL_KEY = 'gc_automations_state';
+const POLL_MS = 8000;
 
 function loadLocalEnabled(): Record<string, boolean> {
     const base: Record<string, boolean> = {};
@@ -123,19 +129,27 @@ function loadLocalEnabled(): Record<string, boolean> {
     return base;
 }
 
+function formatElapsed(from: string | null | undefined): string {
+    if (!from) return '';
+    const secs = Math.max(0, Math.floor((Date.now() - new Date(from).getTime()) / 1000));
+    const m = Math.floor(secs / 60);
+    const s = secs % 60;
+    return `${m}:${String(s).padStart(2, '0')}`;
+}
+
 export default function AutomationsWidget() {
     const [enabled, setEnabled] = useState<Record<string, boolean>>(loadLocalEnabled);
     const [dbRows, setDbRows] = useState<AutomationState[]>(() => readCachedAutomations() ?? []);
     const [saving, setSaving] = useState<string | null>(null);
     const [requesting, setRequesting] = useState<string | null>(null);
+    const [, setTick] = useState(0); // re-render for the elapsed timer
 
     // Load the authoritative state from Supabase (falls back to the cache).
-    useEffect(() => {
-        let cancelled = false;
-        (async () => {
-            const { rows } = await listAutomations();
-            if (cancelled || !rows.length) return;
-            setDbRows(rows);
+    const refresh = useCallback(async (applyEnabled: boolean) => {
+        const { rows } = await listAutomations();
+        if (!rows.length) return;
+        setDbRows(rows);
+        if (applyEnabled) {
             setEnabled((prev) => {
                 const next = { ...prev };
                 rows.forEach((r) => {
@@ -148,10 +162,23 @@ export default function AutomationsWidget() {
                 }
                 return next;
             });
-        })();
-        return () => {
-            cancelled = true;
-        };
+        }
+    }, []);
+
+    useEffect(() => {
+        refresh(true);
+    }, [refresh]);
+
+    // Poll for live run state (queued / running / progress).
+    useEffect(() => {
+        const t = setInterval(() => refresh(false), POLL_MS);
+        return () => clearInterval(t);
+    }, [refresh]);
+
+    // Tick the elapsed-time display.
+    useEffect(() => {
+        const t = setInterval(() => setTick((n) => n + 1), 5000);
+        return () => clearInterval(t);
     }, []);
 
     useEffect(() => {
@@ -180,17 +207,21 @@ export default function AutomationsWidget() {
     );
 
     /** Ask the local scheduler to run this automation right away. */
-    const runNow = useCallback(async (a: AutomationDef) => {
-        if (a.comingSoon) return;
-        setRequesting(a.id);
-        try {
-            await requestAutomationRun(a.id);
-        } catch {
-            /* ignore */
-        } finally {
-            setRequesting(null);
-        }
-    }, []);
+    const runNow = useCallback(
+        async (a: AutomationDef) => {
+            if (a.comingSoon) return;
+            setRequesting(a.id);
+            try {
+                await requestAutomationRun(a.id);
+                await refresh(false); // pick up the "queued" state immediately
+            } catch {
+                /* ignore */
+            } finally {
+                setRequesting(null);
+            }
+        },
+        [refresh]
+    );
 
     const readyCount = useMemo(() => AUTOMATIONS.filter((a) => !a.comingSoon).length, []);
     const activeCount = useMemo(
@@ -199,6 +230,16 @@ export default function AutomationsWidget() {
     );
 
     const rowFor = (id: string) => dbRows.find((r) => r.id === id);
+
+    // The scheduler writes a heartbeat on every poll; if it's stale it isn't running.
+    const heartbeat = dbRows
+        .map((r) => r.scheduler_heartbeat_at)
+        .filter(Boolean)
+        .sort()
+        .pop() as string | undefined;
+    const schedulerOnline = heartbeat
+        ? Date.now() - new Date(heartbeat).getTime() < 90_000
+        : false;
 
     return (
         <div className="bg-white border border-slate-200/60 rounded-3xl p-6 shadow-sm">
@@ -212,6 +253,23 @@ export default function AutomationsWidget() {
                     <span className="text-xs font-bold text-slate-400 uppercase tracking-widest block mt-0.5">
                         {activeCount} av {readyCount} aktive
                     </span>
+                    <span
+                        className={`text-[10px] font-bold uppercase tracking-widest mt-0.5 flex items-center gap-1 ${
+                            schedulerOnline ? 'text-green-600' : 'text-red-500'
+                        }`}
+                        title={
+                            schedulerOnline
+                                ? 'Scheduleren kjører og plukker opp «Kjør nå»'
+                                : 'Scheduleren kjører ikke — start den med `npm run schedule` i dalux-automation'
+                        }
+                    >
+                        <span
+                            className={`w-1.5 h-1.5 rounded-full ${
+                                schedulerOnline ? 'bg-green-500' : 'bg-red-500'
+                            }`}
+                        />
+                        Scheduler {schedulerOnline ? 'online' : 'offline'}
+                    </span>
                 </div>
             </div>
 
@@ -221,30 +279,41 @@ export default function AutomationsWidget() {
                     const isActive = !a.comingSoon && enabled[a.id];
                     const Icon = a.icon;
                     const row = rowFor(a.id);
+                    const isRunning = row?.run_status === 'running';
+                    const isQueued = row?.run_status === 'queued';
+                    const busy = isRunning || isQueued;
 
                     const rowClasses = a.comingSoon
                         ? 'border-dashed border-slate-200 bg-slate-50/50'
-                        : isActive
-                            ? 'border-green-200 bg-green-50/60'
-                            : 'border-slate-200 bg-slate-50/70 hover:bg-slate-100/70';
+                        : busy
+                            ? 'border-primary-200 bg-primary-50/60'
+                            : isActive
+                                ? 'border-green-200 bg-green-50/60'
+                                : 'border-slate-200 bg-slate-50/70 hover:bg-slate-100/70';
 
                     const iconWrapClasses = a.comingSoon
                         ? 'bg-slate-100 text-slate-400'
-                        : isActive
-                            ? 'bg-green-100 text-green-600'
-                            : 'bg-white text-slate-400 border border-slate-200';
+                        : busy
+                            ? 'bg-primary-100 text-primary-600'
+                            : isActive
+                                ? 'bg-green-100 text-green-600'
+                                : 'bg-white text-slate-400 border border-slate-200';
 
                     const statusClasses = a.comingSoon
                         ? 'bg-amber-100 text-amber-700'
-                        : isActive
-                            ? 'bg-green-100 text-green-700'
-                            : 'bg-slate-200 text-slate-600';
+                        : busy
+                            ? 'bg-primary-100 text-primary-700'
+                            : isActive
+                                ? 'bg-green-100 text-green-700'
+                                : 'bg-slate-200 text-slate-600';
 
                     const statusLabel = a.comingSoon
                         ? 'Kommer'
-                        : isActive
-                            ? 'Aktiv'
-                            : 'Inaktiv';
+                        : busy
+                            ? 'Kjører'
+                            : isActive
+                                ? 'Aktiv'
+                                : 'Inaktiv';
 
                     return (
                         <div
@@ -254,7 +323,7 @@ export default function AutomationsWidget() {
                             <div
                                 className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${iconWrapClasses}`}
                             >
-                                <Icon className="w-4 h-4" />
+                                {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Icon className="w-4 h-4" />}
                             </div>
 
                             <div className="min-w-0 flex-1">
@@ -275,12 +344,29 @@ export default function AutomationsWidget() {
                                 <p className="text-[11px] font-medium text-slate-500 leading-snug mt-0.5 line-clamp-2">
                                     {a.description}
                                 </p>
-                                {a.scheduleLabel && (
+
+                                {/* Live progress */}
+                                {busy && (
+                                    <p className="text-[10px] font-bold text-primary-700 mt-1 flex items-center gap-1.5">
+                                        <Loader2 className="w-3 h-3 animate-spin shrink-0" />
+                                        <span className="truncate">
+                                            {isQueued
+                                                ? schedulerOnline
+                                                    ? 'I kø – venter på scheduler'
+                                                    : 'I kø – scheduler er ikke startet (kjør `npm run schedule`)'
+                                                : `Kjører (${formatElapsed(row?.run_started_at)}): ${
+                                                      row?.run_progress || '…'
+                                                  }`}
+                                        </span>
+                                    </p>
+                                )}
+
+                                {!busy && a.scheduleLabel && (
                                     <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1 flex items-center gap-1">
                                         <Clock className="w-3 h-3" /> {a.scheduleLabel}
                                     </p>
                                 )}
-                                {!a.comingSoon && row?.last_run_at && (
+                                {!busy && !a.comingSoon && row?.last_run_at && (
                                     <p className="text-[10px] font-semibold text-slate-400 mt-0.5">
                                         Sist kjørt:{' '}
                                         {new Date(row.last_run_at).toLocaleString('no-NO', {
@@ -297,12 +383,16 @@ export default function AutomationsWidget() {
                                     <button
                                         type="button"
                                         onClick={() => runNow(a)}
-                                        disabled={requesting === a.id}
+                                        disabled={requesting === a.id || busy}
                                         title="Kjør automasjonen nå (krever at scheduleren kjører)"
                                         className="px-2 py-1 text-[10px] font-extrabold uppercase tracking-widest rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-100 transition-colors disabled:opacity-50 disabled:cursor-wait flex items-center gap-1"
                                     >
-                                        <Play className="w-3 h-3" />
-                                        {requesting === a.id ? 'Kjører…' : 'Kjør nå'}
+                                        {busy || requesting === a.id ? (
+                                            <Loader2 className="w-3 h-3 animate-spin" />
+                                        ) : (
+                                            <Play className="w-3 h-3" />
+                                        )}
+                                        {busy || requesting === a.id ? 'Kjører…' : 'Kjør nå'}
                                     </button>
                                 )}
 

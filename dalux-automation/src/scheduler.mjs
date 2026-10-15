@@ -3,17 +3,19 @@
 // Runs the Dalux automations on their schedules — and immediately when the
 // user presses "Kjør nå" in the app.
 //
-// The on/off flags and run requests live in Supabase (table `automations`) so
-// they can be controlled from the web app's Automations panel on the homepage.
-// This process only fires a script when its automation is ENABLED, or when a
-// run has been explicitly requested from the app.
+// The on/off flags, run requests and live progress live in Supabase (table
+// `automations`) so they can be controlled and watched from the web app's
+// Automations panel on the homepage. This process only fires a script when its
+// automation is ENABLED, or when a run has been explicitly requested.
+//
+// Run state written to the row:
+//   run_status      queued -> running -> done | failed
+//   run_started_at / run_finished_at
+//   run_progress    latest line from the running script
 //
 // Registered automations (id -> script):
 //   vernerunde-purring   -> dalux-field-purring.mjs   (Wed 14:00)
 //   vernerunde-utskrift  -> dalux-field-print.mjs     (Tue 08:00)
-//
-// The schedule for each is read from its `automations` row, so it can be
-// changed in the database without touching this file.
 //
 // Run:  npm run schedule
 // Test: DRY_RUN=1 npm run schedule   (the Playwright runs rehearse, never send)
@@ -42,6 +44,8 @@ const AUTOMATION_REGISTRY = [
 
 // How often to check for "Kjør nå" requests from the app.
 const POLL_MS = Number(process.env.POLL_MS || 20000);
+// How often progress lines are written back to Supabase (ms).
+const PROGRESS_THROTTLE_MS = Number(process.env.PROGRESS_THROTTLE_MS || 2000);
 
 const SUPABASE_URL = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || '';
 const SERVICE_KEY =
@@ -76,20 +80,36 @@ async function getAutomation(id) {
   return data;
 }
 
-async function markRun(id, status) {
-  const { error } = await supabase
-    .from('automations')
-    .update({ last_run_at: new Date().toISOString(), last_run_status: status })
-    .eq('id', id);
-  if (error) console.error('Failed to update last_run:', error.message);
+async function setRunState(id, patch) {
+  const { error } = await supabase.from('automations').update(patch).eq('id', id);
+  if (error) console.error(`Failed to update run state for "${id}":`, error.message);
 }
 
-function runScript(script) {
+/** Tell the app the scheduler is alive (drives the online/offline indicator). */
+async function heartbeat() {
+  const { error } = await supabase
+    .from('automations')
+    .update({ scheduler_heartbeat_at: new Date().toISOString() })
+    .in('id', AUTOMATION_REGISTRY.map((e) => e.id));
+  if (error) console.error('heartbeat failed:', error.message);
+}
+
+/** Run a script, forwarding its output and reporting progress lines. */
+function runScript(script, onLine) {
   return new Promise((resolve) => {
     const child = spawn(process.execPath, [path.join(__dirname, script)], {
       env: { ...process.env, AUTO: '1' }, // scheduled run: no confirmation prompt
-      stdio: 'inherit',
     });
+    const handle = (buf) => {
+      const text = buf.toString();
+      process.stdout.write(text);
+      for (const line of text.split(/\r?\n/)) {
+        const t = line.trim();
+        if (t) onLine(t);
+      }
+    };
+    child.stdout?.on('data', handle);
+    child.stderr?.on('data', (b) => process.stderr.write(b));
     child.on('exit', (code) => resolve(code ?? 1));
     child.on('error', (e) => {
       console.error(`Failed to start ${script}:`, e.message);
@@ -98,23 +118,52 @@ function runScript(script) {
   });
 }
 
-/** Run one automation end-to-end and record the result. */
+/** Run one automation end-to-end, publishing live progress to Supabase. */
 async function runEntry(entry, row, reason) {
   if (running.has(entry.id)) {
     console.log(`[${entry.id}] previous run still in progress — skipping (${reason}).`);
     return;
   }
   running.add(entry.id);
+
+  await setRunState(entry.id, {
+    run_status: 'running',
+    run_started_at: new Date().toISOString(),
+    run_finished_at: null,
+    run_progress: `Starter (${reason})…`,
+  });
+
+  let lastWrite = 0;
+  const onLine = (line) => {
+    const now = Date.now();
+    if (now - lastWrite < PROGRESS_THROTTLE_MS) return;
+    lastWrite = now;
+    setRunState(entry.id, { run_progress: line.slice(0, 200) }).catch(() => {});
+  };
+
   try {
     console.log(
       `\n=== [${entry.id}] Running "${row.name}" (${reason}) at ${new Date().toLocaleString('no-NO')} ===`
     );
-    const code = await runScript(entry.script);
-    await markRun(entry.id, code === 0 ? 'OK' : `Feilet (kode ${code})`);
+    const code = await runScript(entry.script, onLine);
+    const ok = code === 0;
+    await setRunState(entry.id, {
+      run_status: ok ? 'done' : 'failed',
+      run_finished_at: new Date().toISOString(),
+      run_progress: ok ? 'Fullført' : `Feilet (kode ${code})`,
+      last_run_at: new Date().toISOString(),
+      last_run_status: ok ? 'OK' : `Feilet (kode ${code})`,
+    });
     console.log(`=== [${entry.id}] Finished (exit code ${code}) ===`);
   } catch (e) {
     console.error(`[${entry.id}] run failed:`, e.message);
-    await markRun(entry.id, `Feilet: ${e.message}`).catch(() => {});
+    await setRunState(entry.id, {
+      run_status: 'failed',
+      run_finished_at: new Date().toISOString(),
+      run_progress: `Feilet: ${e.message}`.slice(0, 200),
+      last_run_at: new Date().toISOString(),
+      last_run_status: `Feilet: ${e.message}`,
+    });
   } finally {
     running.delete(entry.id);
   }
@@ -142,6 +191,7 @@ function makeTick(entry) {
  * explicit user action.
  */
 async function pollRunRequests() {
+  await heartbeat();
   for (const entry of AUTOMATION_REGISTRY) {
     let row;
     try {
@@ -163,6 +213,8 @@ async function pollRunRequests() {
     await runEntry(entry, row, 'manuell "Kjør nå"');
   }
 }
+
+await heartbeat();
 
 const ONCE = process.argv.includes('--once');
 

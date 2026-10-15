@@ -356,8 +356,10 @@ async function processChecklist(page, scroller, nr) {
   await dump(page, `03-checklist-${nr}`);
 
   let processed = 0;
-  for (const chip of chips.slice(0, MAX_ITEMS)) {
-    log(`  → task ${chip.id} "${chip.text}"`);
+  const list = chips.slice(0, MAX_ITEMS);
+  for (let i = 0; i < list.length; i++) {
+    const chip = list[i];
+    log(`  → task ${i + 1}/${list.length} ${chip.id} "${chip.text}"`);
     try {
       const chipLoc = page.locator('[data-cy="attached-tasks-chip"]').filter({ hasText: chip.id }).first();
       await chipLoc.scrollIntoViewIfNeeded().catch(() => {});

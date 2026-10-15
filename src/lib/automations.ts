@@ -19,6 +19,14 @@ export interface AutomationState {
     last_run_at: string | null;
     last_run_status: string | null;
     run_requested_at: string | null;
+    /** queued | running | done | failed */
+    run_status: string | null;
+    run_started_at: string | null;
+    run_finished_at: string | null;
+    /** latest progress line from the running script */
+    run_progress: string | null;
+    /** last time the local scheduler checked in (drives the online indicator) */
+    scheduler_heartbeat_at: string | null;
     updated_at: string;
 }
 
@@ -73,7 +81,11 @@ export async function setAutomationEnabled(id: string, enabled: boolean): Promis
 export async function requestAutomationRun(id: string): Promise<void> {
     const { error } = await supabase
         .from('automations')
-        .update({ run_requested_at: new Date().toISOString() })
+        .update({
+            run_requested_at: new Date().toISOString(),
+            run_status: 'queued',
+            run_progress: 'I kø – venter på scheduler',
+        })
         .eq('id', id);
     if (error) throw error;
 }

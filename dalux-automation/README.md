@@ -166,6 +166,17 @@ node src/scheduler.mjs --once    # run one tick now and exit (also for Task Sche
 schedule and the enabled flag (it is an explicit user action). The scheduler
 process must be running for it to work.
 
+**Live progress:** while a run is in flight the scheduler writes `run_status`
+(`queued → running → done | failed`), `run_started_at` / `run_finished_at` and
+`run_progress` (the latest line from the script, throttled to every 2 s). The
+panel polls every 8 s and shows a spinner, the elapsed time and the current step
+(e.g. `Kjører (1:23): → task 3/15 Gjør3368 …`).
+
+**Scheduler heartbeat:** the scheduler stamps `scheduler_heartbeat_at` on every
+poll, so the panel shows **Scheduler online/offline**. If a run is queued while
+it is offline, the panel says so — that is the usual reason "Kjør nå" appears to
+do nothing.
+
 - Each automation's cron is stored in its `automations` row (local time).
 - On each tick the scheduler reads `enabled`; if it is off, nothing runs.
 - When it runs, the Playwright script starts with `AUTO=1` (no confirmation prompt)
