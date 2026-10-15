@@ -44,6 +44,8 @@ const AUTOMATION_REGISTRY = [
 
 // How often to check for "Kjør nå" requests from the app.
 const POLL_MS = Number(process.env.POLL_MS || 20000);
+// "Stopp" is polled more often so it feels immediate.
+const STOP_POLL_MS = Number(process.env.STOP_POLL_MS || 4000);
 // How often progress lines are written back to Supabase (ms).
 const PROGRESS_THROTTLE_MS = Number(process.env.PROGRESS_THROTTLE_MS || 2000);
 
@@ -239,6 +241,17 @@ async function pollRunRequests() {
       console.error(`[${entry.id}] failed to clear run request:`, error.message);
       continue;
     }
+
+    // Re-read: a "Stopp" may have been requested in the meantime (the stop poll
+    // and this poll can otherwise race and start a run that was just cancelled).
+    const fresh = await getAutomation(entry.id);
+    if (fresh?.stop_requested_at) {
+      await supabase.from('automations').update({ stop_requested_at: null }).eq('id', entry.id);
+      console.log(`[${entry.id}] run cancelled by a stop request.`);
+      await setRunState(entry.id, { run_status: 'stopped', run_progress: 'Stoppet av bruker' });
+      continue;
+    }
+
     await runEntry(entry, row, 'manuell "Kjør nå"');
   }
 }
@@ -262,8 +275,10 @@ async function pollStopRequests() {
     if (killChild(entry.id)) {
       console.log(`[${entry.id}] stop requested from the app — terminating the run.`);
     } else {
-      console.log(`[${entry.id}] stop requested but nothing is running.`);
-      await setRunState(entry.id, { run_status: 'done', run_progress: 'Ingen kjøring pågikk' });
+      // Nothing is running: cancel a queued request instead, so it can't start later.
+      await supabase.from('automations').update({ run_requested_at: null }).eq('id', entry.id);
+      console.log(`[${entry.id}] stop requested — cancelled the queued run.`);
+      await setRunState(entry.id, { run_status: 'stopped', run_progress: 'Stoppet av bruker' });
     }
   }
 }
@@ -295,9 +310,16 @@ if (ONCE) {
   process.exit(0);
 }
 
+// One serialized loop: stops are always handled before runs, and the two never
+// overlap (which previously let a just-cancelled run start anyway).
+const RUN_EVERY = Math.max(1, Math.round(POLL_MS / STOP_POLL_MS));
+let tickCount = 0;
 setInterval(async () => {
   await pollStopRequests();
-  await pollRunRequests();
-}, POLL_MS).unref();
-console.log(`\nScheduler running. "Kjør nå" / "Stopp" requests are polled every ${POLL_MS / 1000}s.`);
+  tickCount += 1;
+  if (tickCount % RUN_EVERY === 0) await pollRunRequests();
+}, STOP_POLL_MS).unref();
+console.log(
+  `\nScheduler running. "Stopp" polled every ${STOP_POLL_MS / 1000}s, "Kjør nå" every ${POLL_MS / 1000}s.`
+);
 console.log('Keep this process open (or use --once from Task Scheduler).');

@@ -172,9 +172,11 @@ process must be running for it to work.
 panel polls every 8 s and shows a spinner, the elapsed time and the current step
 (e.g. `Kjører (1:23): → task 3/15 Gjør3368 …`).
 
-**"Stopp"** appears in place of "Kjør nå" while a run is in flight: it sets
-`stop_requested_at`, and the scheduler kills the running script (and its browser)
-and marks the run `stopped`.
+**"Stopp"** sits next to "Kjør nå" (disabled when nothing is running): it sets
+`stop_requested_at`, and the scheduler — which polls stops every 4 s — kills the
+running script (and its browser) and marks the run `stopped`. Stopping a *queued*
+run cancels it before it starts. The panel keeps showing "Stopper…" until the
+scheduler confirms the run has ended.
 
 **Scheduler heartbeat:** the scheduler stamps `scheduler_heartbeat_at` on every
 poll, so the panel shows **Scheduler online/offline**. If a run is queued while

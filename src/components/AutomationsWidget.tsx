@@ -147,6 +147,7 @@ export default function AutomationsWidget() {
     const [saving, setSaving] = useState<string | null>(null);
     const [requesting, setRequesting] = useState<string | null>(null);
     const [stopping, setStopping] = useState<string | null>(null);
+    const [stopPending, setStopPending] = useState<Set<string>>(new Set());
     const [, setTick] = useState(0); // re-render for the elapsed timer
 
     // Load the authoritative state from Supabase (falls back to the cache).
@@ -233,6 +234,7 @@ export default function AutomationsWidget() {
         async (a: AutomationDef) => {
             if (a.comingSoon) return;
             setStopping(a.id);
+            setStopPending((prev) => new Set(prev).add(a.id));
             try {
                 await requestAutomationStop(a.id);
                 await refresh(false);
@@ -244,6 +246,20 @@ export default function AutomationsWidget() {
         },
         [refresh]
     );
+
+    // Keep "Stopper…" until the scheduler confirms the run has actually ended.
+    useEffect(() => {
+        setStopPending((prev) => {
+            if (!prev.size) return prev;
+            const next = new Set(prev);
+            for (const id of prev) {
+                const r = dbRows.find((x) => x.id === id);
+                const busy = r?.run_status === 'running' || r?.run_status === 'queued';
+                if (!busy) next.delete(id);
+            }
+            return next.size === prev.size ? prev : next;
+        });
+    }, [dbRows]);
 
     const readyCount = useMemo(() => AUTOMATIONS.filter((a) => !a.comingSoon).length, []);
     const activeCount = useMemo(
@@ -330,6 +346,7 @@ export default function AutomationsWidget() {
                     const isRunning = row?.run_status === 'running';
                     const isQueued = row?.run_status === 'queued';
                     const busy = isRunning || isQueued;
+                    const stopBusy = stopping === a.id || stopPending.has(a.id);
 
                     const rowClasses = a.comingSoon
                         ? 'border-dashed border-slate-200 bg-slate-50/50'
@@ -432,16 +449,16 @@ export default function AutomationsWidget() {
                                         <button
                                             type="button"
                                             onClick={() => stopNow(a)}
-                                            disabled={!busy || stopping === a.id}
+                                            disabled={!busy || stopBusy}
                                             title={busy ? 'Stopp kjøringen' : 'Ingen kjøring pågår'}
                                             className="px-2 py-1 text-[10px] font-extrabold uppercase tracking-widest rounded-lg border border-red-200 bg-red-50 text-red-600 hover:bg-red-100 transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1"
                                         >
-                                            {stopping === a.id ? (
+                                            {stopBusy ? (
                                                 <Loader2 className="w-3 h-3 animate-spin" />
                                             ) : (
                                                 <Square className="w-3 h-3" />
                                             )}
-                                            {stopping === a.id ? 'Stopper…' : 'Stopp'}
+                                            {stopBusy ? 'Stopper…' : 'Stopp'}
                                         </button>
 
                                         <button
