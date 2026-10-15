@@ -172,10 +172,32 @@ process must be running for it to work.
 panel polls every 8 s and shows a spinner, the elapsed time and the current step
 (e.g. `Kjører (1:23): → task 3/15 Gjør3368 …`).
 
+**"Stopp"** appears in place of "Kjør nå" while a run is in flight: it sets
+`stop_requested_at`, and the scheduler kills the running script (and its browser)
+and marks the run `stopped`.
+
 **Scheduler heartbeat:** the scheduler stamps `scheduler_heartbeat_at` on every
 poll, so the panel shows **Scheduler online/offline**. If a run is queued while
 it is offline, the panel says so — that is the usual reason "Kjør nå" appears to
 do nothing.
+
+### Starting the scheduler without a terminal
+
+Run the one-time setup once:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install-scheduler.ps1
+```
+
+It registers a `daluxscheduler:` URI protocol (HKCU only — no admin needed) so
+the panel's **Start scheduler** button launches the scheduler on this machine,
+and it tries to add a hidden logon task so the scheduler starts automatically at
+every login (that part may require an elevated shell). Remove both with
+`-Uninstall`.
+
+The scheduler must run on the machine that holds the Dalux session, the local
+folders and Outlook — a web page cannot start a local process, which is why the
+button uses the protocol handler.
 
 - Each automation's cron is stored in its `automations` row (local time).
 - On each tick the scheduler reads `enabled`; if it is off, nothing runs.
@@ -243,7 +265,11 @@ dalux-automation/
 │  ├─ screenshot.mjs            # template: reuse session, do something, screenshot
 │  ├─ dalux-field-purring.mjs   # Dalux Field checklist "Purring" notifications
 │  ├─ dalux-field-print.mjs     # Print newest vernerunde as Håndverkerrapport PDF
-│  └─ scheduler.mjs             # cron: runs each script when its flag is enabled
+│  └─ scheduler.mjs             # cron + "Kjør nå"/"Stopp" + progress + heartbeat
+├─ scripts/
+│  ├─ start-scheduler.vbs       # hidden launcher (logon task + protocol)
+│  ├─ install-scheduler.ps1     # one-time setup (protocol + logon task) / -Uninstall
+│  └─ outlook-draft.ps1         # creates the email draft in Outlook (never sends)
 ├─ user-data/          # git-ignored: Chromium profile with your session
 └─ dalux-auth.json     # git-ignored: storage state for codegen
 ```

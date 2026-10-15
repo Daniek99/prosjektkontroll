@@ -27,6 +27,7 @@ export interface AutomationState {
     run_progress: string | null;
     /** last time the local scheduler checked in (drives the online indicator) */
     scheduler_heartbeat_at: string | null;
+    stop_requested_at: string | null;
     updated_at: string;
 }
 
@@ -86,6 +87,15 @@ export async function requestAutomationRun(id: string): Promise<void> {
             run_status: 'queued',
             run_progress: 'I kø – venter på scheduler',
         })
+        .eq('id', id);
+    if (error) throw error;
+}
+
+/** Ask the local scheduler to stop the run that is currently in progress. */
+export async function requestAutomationStop(id: string): Promise<void> {
+    const { error } = await supabase
+        .from('automations')
+        .update({ stop_requested_at: new Date().toISOString() })
         .eq('id', id);
     if (error) throw error;
 }

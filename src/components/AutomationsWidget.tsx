@@ -10,6 +10,7 @@ import {
     Plus,
     Clock,
     Play,
+    Square,
     Loader2,
     type LucideIcon,
 } from 'lucide-react';
@@ -17,6 +18,7 @@ import {
     listAutomations,
     setAutomationEnabled,
     requestAutomationRun,
+    requestAutomationStop,
     readCachedAutomations,
     type AutomationState,
 } from '../lib/automations';
@@ -29,16 +31,17 @@ import {
  * A localStorage cache mirrors the state for offline/fallback rendering.
  *
  * "Kjør nå" asks the scheduler to run the automation immediately, bypassing
- * the cron schedule. The scheduler polls for `run_requested_at`, clears it and
- * executes the script — so the scheduler process must be running.
+ * the cron schedule; "Stopp" terminates the run in progress. Both work by
+ * setting a flag in Supabase that the local scheduler polls.
  *
  * Live progress: the scheduler writes `run_status` (queued → running → done |
- * failed) and `run_progress` (the latest line from the script) to the row; this
- * panel polls for it so you can see what is currently running.
+ * failed | stopped) and `run_progress` (the latest line from the script) to the
+ * row; this panel polls for it so you can see what is currently running.
  *
- * "Vernerunde purring" and "Vernerunde utskrift" are real automations
- * (Playwright, Dalux Field). They are DISABLED by default until the setup is
- * fully complete. The remaining entries are placeholders for automations to come.
+ * The scheduler runs on this machine (it needs the local Dalux session, the
+ * local folders and Outlook). It writes a heartbeat, so the panel shows whether
+ * it is online — and offers a "Start scheduler" button (the `daluxscheduler:`
+ * protocol) when it isn't.
  */
 
 interface AutomationDef {
@@ -101,7 +104,7 @@ const AUTOMATIONS: AutomationDef[] = [
         id: 'invoice-export',
         name: 'Fakturaeksport',
         description:
-            'Eksporterer godkjendte endringsmeldinger til regnskapssystemet.',
+            'Eksporterer godkjente endringsmeldinger til regnskapssystemet.',
         icon: Receipt,
         comingSoon: true,
     },
@@ -142,6 +145,7 @@ export default function AutomationsWidget() {
     const [dbRows, setDbRows] = useState<AutomationState[]>(() => readCachedAutomations() ?? []);
     const [saving, setSaving] = useState<string | null>(null);
     const [requesting, setRequesting] = useState<string | null>(null);
+    const [stopping, setStopping] = useState<string | null>(null);
     const [, setTick] = useState(0); // re-render for the elapsed timer
 
     // Load the authoritative state from Supabase (falls back to the cache).
@@ -223,6 +227,23 @@ export default function AutomationsWidget() {
         [refresh]
     );
 
+    /** Ask the local scheduler to stop the run in progress. */
+    const stopNow = useCallback(
+        async (a: AutomationDef) => {
+            if (a.comingSoon) return;
+            setStopping(a.id);
+            try {
+                await requestAutomationStop(a.id);
+                await refresh(false);
+            } catch {
+                /* ignore */
+            } finally {
+                setStopping(null);
+            }
+        },
+        [refresh]
+    );
+
     const readyCount = useMemo(() => AUTOMATIONS.filter((a) => !a.comingSoon).length, []);
     const activeCount = useMemo(
         () => AUTOMATIONS.filter((a) => !a.comingSoon && enabled[a.id]).length,
@@ -248,7 +269,7 @@ export default function AutomationsWidget() {
                 <div className="w-10 h-10 rounded-2xl bg-primary-50 flex items-center justify-center shrink-0">
                     <Workflow className="w-5 h-5 text-primary-600" />
                 </div>
-                <div>
+                <div className="min-w-0">
                     <h2 className="text-lg font-bold text-slate-800">Automasjoner</h2>
                     <span className="text-xs font-bold text-slate-400 uppercase tracking-widest block mt-0.5">
                         {activeCount} av {readyCount} aktive
@@ -260,7 +281,7 @@ export default function AutomationsWidget() {
                         title={
                             schedulerOnline
                                 ? 'Scheduleren kjører og plukker opp «Kjør nå»'
-                                : 'Scheduleren kjører ikke — start den med `npm run schedule` i dalux-automation'
+                                : 'Scheduleren kjører ikke — start den med knappen'
                         }
                     >
                         <span
@@ -270,6 +291,15 @@ export default function AutomationsWidget() {
                         />
                         Scheduler {schedulerOnline ? 'online' : 'offline'}
                     </span>
+                    {!schedulerOnline && (
+                        <a
+                            href="daluxscheduler://start"
+                            className="mt-1.5 inline-flex items-center gap-1 px-2 py-1 text-[10px] font-extrabold uppercase tracking-widest rounded-lg bg-primary-500 text-white hover:bg-primary-600 transition-colors"
+                            title="Starter scheduleren på denne maskinen (krever engangsoppsett)"
+                        >
+                            <Play className="w-3 h-3" /> Start scheduler
+                        </a>
+                    )}
                 </div>
             </div>
 
@@ -353,7 +383,7 @@ export default function AutomationsWidget() {
                                             {isQueued
                                                 ? schedulerOnline
                                                     ? 'I kø – venter på scheduler'
-                                                    : 'I kø – scheduler er ikke startet (kjør `npm run schedule`)'
+                                                    : 'I kø – scheduler er ikke startet'
                                                 : `Kjører (${formatElapsed(row?.run_started_at)}): ${
                                                       row?.run_progress || '…'
                                                   }`}
@@ -379,22 +409,38 @@ export default function AutomationsWidget() {
                             </div>
 
                             <div className="flex items-center gap-2 shrink-0">
-                                {!a.comingSoon && (
-                                    <button
-                                        type="button"
-                                        onClick={() => runNow(a)}
-                                        disabled={requesting === a.id || busy}
-                                        title="Kjør automasjonen nå (krever at scheduleren kjører)"
-                                        className="px-2 py-1 text-[10px] font-extrabold uppercase tracking-widest rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-100 transition-colors disabled:opacity-50 disabled:cursor-wait flex items-center gap-1"
-                                    >
-                                        {busy || requesting === a.id ? (
-                                            <Loader2 className="w-3 h-3 animate-spin" />
-                                        ) : (
-                                            <Play className="w-3 h-3" />
-                                        )}
-                                        {busy || requesting === a.id ? 'Kjører…' : 'Kjør nå'}
-                                    </button>
-                                )}
+                                {!a.comingSoon &&
+                                    (busy ? (
+                                        <button
+                                            type="button"
+                                            onClick={() => stopNow(a)}
+                                            disabled={stopping === a.id}
+                                            title="Stopp kjøringen"
+                                            className="px-2 py-1 text-[10px] font-extrabold uppercase tracking-widest rounded-lg border border-red-200 bg-red-50 text-red-600 hover:bg-red-100 transition-colors disabled:opacity-50 disabled:cursor-wait flex items-center gap-1"
+                                        >
+                                            {stopping === a.id ? (
+                                                <Loader2 className="w-3 h-3 animate-spin" />
+                                            ) : (
+                                                <Square className="w-3 h-3" />
+                                            )}
+                                            {stopping === a.id ? 'Stopper…' : 'Stopp'}
+                                        </button>
+                                    ) : (
+                                        <button
+                                            type="button"
+                                            onClick={() => runNow(a)}
+                                            disabled={requesting === a.id}
+                                            title="Kjør automasjonen nå (krever at scheduleren kjører)"
+                                            className="px-2 py-1 text-[10px] font-extrabold uppercase tracking-widest rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-100 transition-colors disabled:opacity-50 disabled:cursor-wait flex items-center gap-1"
+                                        >
+                                            {requesting === a.id ? (
+                                                <Loader2 className="w-3 h-3 animate-spin" />
+                                            ) : (
+                                                <Play className="w-3 h-3" />
+                                            )}
+                                            {requesting === a.id ? 'Kjører…' : 'Kjør nå'}
+                                        </button>
+                                    ))}
 
                                 <div className="flex flex-col items-end gap-1.5">
                                     <span
