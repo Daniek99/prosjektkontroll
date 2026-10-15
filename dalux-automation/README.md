@@ -195,9 +195,14 @@ and it tries to add a hidden logon task so the scheduler starts automatically at
 every login (that part may require an elevated shell). Remove both with
 `-Uninstall`.
 
+The same protocol powers the **Logg inn på Dalux** button
+(`daluxscheduler://login`), which appears when a run hits a login page. It opens
+Dalux in a browser, waits for you to log in, saves the session automatically and
+marks it OK — no terminal and no Enter key needed.
+
 The scheduler must run on the machine that holds the Dalux session, the local
 folders and Outlook — a web page cannot start a local process, which is why the
-button uses the protocol handler.
+buttons use the protocol handler.
 
 - Each automation's cron is stored in its `automations` row (local time).
 - On each tick the scheduler reads `enabled`; if it is off, nothing runs.

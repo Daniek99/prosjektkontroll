@@ -28,6 +28,8 @@ export interface AutomationState {
     /** last time the local scheduler checked in (drives the online indicator) */
     scheduler_heartbeat_at: string | null;
     stop_requested_at: string | null;
+    /** 'ok' | 'expired' — whether the Dalux session still works */
+    session_status: string | null;
     updated_at: string;
 }
 

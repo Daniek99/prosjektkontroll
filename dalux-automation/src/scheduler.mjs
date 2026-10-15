@@ -157,6 +157,10 @@ async function runEntry(entry, row, reason) {
 
   let lastWrite = 0;
   const onLine = (line) => {
+    // A login redirect means the Dalux session expired — flag it for the app.
+    if (/redirected to a login|login page/i.test(line)) {
+      setRunState(entry.id, { session_status: 'expired' }).catch(() => {});
+    }
     const now = Date.now();
     if (now - lastWrite < PROGRESS_THROTTLE_MS) return;
     lastWrite = now;
@@ -170,13 +174,15 @@ async function runEntry(entry, row, reason) {
     const code = await runScript(entry.id, entry.script, onLine);
     const wasStopped = stopped.delete(entry.id);
     const ok = code === 0 && !wasStopped;
-    await setRunState(entry.id, {
+    const patch = {
       run_status: wasStopped ? 'stopped' : ok ? 'done' : 'failed',
       run_finished_at: new Date().toISOString(),
       run_progress: wasStopped ? 'Stoppet av bruker' : ok ? 'Fullført' : `Feilet (kode ${code})`,
       last_run_at: new Date().toISOString(),
       last_run_status: wasStopped ? 'Stoppet av bruker' : ok ? 'OK' : `Feilet (kode ${code})`,
-    });
+    };
+    if (ok) patch.session_status = 'ok'; // a successful run proves the session works
+    await setRunState(entry.id, patch);
     console.log(`=== [${entry.id}] Finished (exit code ${code}) ===`);
   } catch (e) {
     console.error(`[${entry.id}] run failed:`, e.message);

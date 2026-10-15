@@ -11,6 +11,7 @@ import {
     Clock,
     Play,
     Square,
+    LogIn,
     Loader2,
     type LucideIcon,
 } from 'lucide-react';
@@ -30,9 +31,9 @@ import {
  * Playwright scheduler (dalux-automation) can read it outside the browser.
  * A localStorage cache mirrors the state for offline/fallback rendering.
  *
- * "Kjør nå" asks the scheduler to run the automation immediately, bypassing
- * the cron schedule; "Stopp" terminates the run in progress. Both work by
- * setting a flag in Supabase that the local scheduler polls.
+ * "Kjør nå" asks the scheduler to run the automation immediately, bypassing the
+ * cron schedule; "Stopp" terminates the run in progress. Both work by setting a
+ * flag in Supabase that the local scheduler polls.
  *
  * Live progress: the scheduler writes `run_status` (queued → running → done |
  * failed | stopped) and `run_progress` (the latest line from the script) to the
@@ -40,8 +41,8 @@ import {
  *
  * The scheduler runs on this machine (it needs the local Dalux session, the
  * local folders and Outlook). It writes a heartbeat, so the panel shows whether
- * it is online — and offers a "Start scheduler" button (the `daluxscheduler:`
- * protocol) when it isn't.
+ * it is online — and offers "Start scheduler" / "Logg inn på Dalux" buttons
+ * (the `daluxscheduler:` protocol) so no terminal is ever needed.
  */
 
 interface AutomationDef {
@@ -262,10 +263,13 @@ export default function AutomationsWidget() {
         ? Date.now() - new Date(heartbeat).getTime() < 90_000
         : false;
 
+    // The scheduler flags an expired Dalux session when a run hits a login page.
+    const sessionExpired = dbRows.some((r) => r.session_status === 'expired');
+
     return (
         <div className="bg-white border border-slate-200/60 rounded-3xl p-6 shadow-sm">
             {/* Header */}
-            <div className="flex items-center gap-3 mb-4">
+            <div className="flex items-start gap-3 mb-4">
                 <div className="w-10 h-10 rounded-2xl bg-primary-50 flex items-center justify-center shrink-0">
                     <Workflow className="w-5 h-5 text-primary-600" />
                 </div>
@@ -291,14 +295,28 @@ export default function AutomationsWidget() {
                         />
                         Scheduler {schedulerOnline ? 'online' : 'offline'}
                     </span>
-                    {!schedulerOnline && (
-                        <a
-                            href="daluxscheduler://start"
-                            className="mt-1.5 inline-flex items-center gap-1 px-2 py-1 text-[10px] font-extrabold uppercase tracking-widest rounded-lg bg-primary-500 text-white hover:bg-primary-600 transition-colors"
-                            title="Starter scheduleren på denne maskinen (krever engangsoppsett)"
-                        >
-                            <Play className="w-3 h-3" /> Start scheduler
-                        </a>
+
+                    {(!schedulerOnline || sessionExpired) && (
+                        <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
+                            {!schedulerOnline && (
+                                <a
+                                    href="daluxscheduler://start"
+                                    className="inline-flex items-center gap-1 px-2 py-1 text-[10px] font-extrabold uppercase tracking-widest rounded-lg bg-primary-500 text-white hover:bg-primary-600 transition-colors"
+                                    title="Starter scheduleren på denne maskinen"
+                                >
+                                    <Play className="w-3 h-3" /> Start scheduler
+                                </a>
+                            )}
+                            {sessionExpired && (
+                                <a
+                                    href="daluxscheduler://login"
+                                    className="inline-flex items-center gap-1 px-2 py-1 text-[10px] font-extrabold uppercase tracking-widest rounded-lg bg-amber-500 text-white hover:bg-amber-600 transition-colors"
+                                    title="Åpner Dalux slik at du kan logge inn — sesjonen lagres automatisk"
+                                >
+                                    <LogIn className="w-3 h-3" /> Logg inn på Dalux
+                                </a>
+                            )}
+                        </div>
                     )}
                 </div>
             </div>
@@ -409,14 +427,14 @@ export default function AutomationsWidget() {
                             </div>
 
                             <div className="flex items-center gap-2 shrink-0">
-                                {!a.comingSoon &&
-                                    (busy ? (
+                                {!a.comingSoon && (
+                                    <>
                                         <button
                                             type="button"
                                             onClick={() => stopNow(a)}
-                                            disabled={stopping === a.id}
-                                            title="Stopp kjøringen"
-                                            className="px-2 py-1 text-[10px] font-extrabold uppercase tracking-widest rounded-lg border border-red-200 bg-red-50 text-red-600 hover:bg-red-100 transition-colors disabled:opacity-50 disabled:cursor-wait flex items-center gap-1"
+                                            disabled={!busy || stopping === a.id}
+                                            title={busy ? 'Stopp kjøringen' : 'Ingen kjøring pågår'}
+                                            className="px-2 py-1 text-[10px] font-extrabold uppercase tracking-widest rounded-lg border border-red-200 bg-red-50 text-red-600 hover:bg-red-100 transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1"
                                         >
                                             {stopping === a.id ? (
                                                 <Loader2 className="w-3 h-3 animate-spin" />
@@ -425,13 +443,13 @@ export default function AutomationsWidget() {
                                             )}
                                             {stopping === a.id ? 'Stopper…' : 'Stopp'}
                                         </button>
-                                    ) : (
+
                                         <button
                                             type="button"
                                             onClick={() => runNow(a)}
-                                            disabled={requesting === a.id}
+                                            disabled={busy || requesting === a.id}
                                             title="Kjør automasjonen nå (krever at scheduleren kjører)"
-                                            className="px-2 py-1 text-[10px] font-extrabold uppercase tracking-widest rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-100 transition-colors disabled:opacity-50 disabled:cursor-wait flex items-center gap-1"
+                                            className="px-2 py-1 text-[10px] font-extrabold uppercase tracking-widest rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-100 transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1"
                                         >
                                             {requesting === a.id ? (
                                                 <Loader2 className="w-3 h-3 animate-spin" />
@@ -440,7 +458,8 @@ export default function AutomationsWidget() {
                                             )}
                                             {requesting === a.id ? 'Kjører…' : 'Kjør nå'}
                                         </button>
-                                    ))}
+                                    </>
+                                )}
 
                                 <div className="flex flex-col items-end gap-1.5">
                                     <span

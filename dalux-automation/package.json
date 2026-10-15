@@ -7,6 +7,7 @@
   "scripts": {
     "install:browsers": "playwright install chromium",
     "login": "node src/login.mjs",
+    "login:auto": "node src/login-auto.mjs",
     "screenshot": "node src/screenshot.mjs",
     "dalux:purring": "node src/dalux-field-purring.mjs",
     "dalux:print": "node src/dalux-field-print.mjs",
