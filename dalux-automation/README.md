@@ -197,6 +197,19 @@ and it tries to add a hidden logon task so the scheduler starts automatically at
 every login (that part may require an elevated shell). Remove both with
 `-Uninstall`.
 
+### Keeping it online for the scheduled runs
+
+The scheduler must be **running on this machine** at the scheduled time — it
+needs the local Dalux session, the local folders and Outlook. The installer adds
+a **Startup-folder shortcut** (`Dalux Automation Scheduler.lnk`), so the
+scheduler starts hidden at every login; that covers the normal case. The machine
+must be switched on and the user logged in.
+
+To check: the panel shows **Scheduler online/offline** (a heartbeat). If it is
+offline, press **Start scheduler**. A logon *scheduled task* is also attempted,
+but creating one may require an elevated shell — the Startup shortcut needs no
+admin.
+
 The same protocol powers the **Logg inn på Dalux** button
 (`daluxscheduler://login`), which appears when a run hits a login page. It opens
 Dalux in a browser, waits for you to log in, saves the session automatically and
