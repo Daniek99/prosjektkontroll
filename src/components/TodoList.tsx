@@ -57,6 +57,7 @@ export default function TodoList() {
     const [addingCategory, setAddingCategory] = useState(false);
     const [newCategoryName, setNewCategoryName] = useState('');
     const [categoryError, setCategoryError] = useState<string | null>(null);
+    const [taskError, setTaskError] = useState<string | null>(null);
 
     useEffect(() => {
         if (user) {
@@ -121,16 +122,18 @@ export default function TodoList() {
             }
         }
 
-        const newTask = {
+        const newTask: Record<string, unknown> = {
             title: newTaskTitle.trim(),
             user_id: user.id,
             is_completed: false,
             is_starred: false,
             due_date: dueDate,
-            category_id: activeCategory ? activeCategory.id : null,
             order_index: tasks.length
         };
+        // Only send category_id when a custom tab is active so plain tasks keep working
+        if (activeCategory) newTask.category_id = activeCategory.id;
 
+        setTaskError(null);
         const { data, error } = await supabase
             .from('user_tasks')
             .insert([newTask])
@@ -140,6 +143,9 @@ export default function TodoList() {
         if (!error && data) {
             setTasks([data, ...tasks].sort((a, b) => (a.is_completed === b.is_completed) ? 0 : a.is_completed ? 1 : -1));
             setNewTaskTitle('');
+        } else {
+            console.error("Error adding task:", error);
+            setTaskError(error?.message ?? 'Kunne ikke lagre oppgaven');
         }
     }
 
@@ -457,6 +463,9 @@ export default function TodoList() {
                 >
                     <Plus className="w-5 h-5" />
                 </button>
+                {taskError && (
+                    <p className="mt-1 text-[10px] text-red-600">{taskError}</p>
+                )}
             </form>
 
             {/* Tabs */}
@@ -511,6 +520,7 @@ export default function TodoList() {
 
                 {categories.length < MAX_CUSTOM_CATEGORIES && (
                     addingCategory ? (
+                        <div className="relative flex-1 min-w-0 flex">
                         <form onSubmit={handleAddCategory} className="relative flex-1 min-w-0 flex items-center">
                             <input
                                 autoFocus
@@ -544,6 +554,7 @@ export default function TodoList() {
                         {categoryError && (
                             <p className="absolute -bottom-5 left-0 text-[10px] text-red-600 whitespace-nowrap">{categoryError}</p>
                         )}
+                        </div>
                     ) : (
                         <button
                             onClick={() => setAddingCategory(true)}
