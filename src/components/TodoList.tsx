@@ -56,6 +56,7 @@ export default function TodoList() {
     const [categories, setCategories] = useState<TaskCategory[]>([]);
     const [addingCategory, setAddingCategory] = useState(false);
     const [newCategoryName, setNewCategoryName] = useState('');
+    const [categoryError, setCategoryError] = useState<string | null>(null);
 
     useEffect(() => {
         if (user) {
@@ -218,6 +219,7 @@ export default function TodoList() {
         const name = newCategoryName.trim();
         if (!name || !user || categories.length >= MAX_CUSTOM_CATEGORIES) return;
 
+        setCategoryError(null);
         const { data, error } = await supabase
             .from('user_task_categories')
             .insert([{ name, user_id: user.id, position: categories.length }])
@@ -229,12 +231,21 @@ export default function TodoList() {
             setNewCategoryName('');
             setAddingCategory(false);
             setActiveTab(data.id);
-        } else if (error) {
+        } else {
             console.error("Error creating task category:", error);
+            setCategoryError(error?.message ?? 'Kunne ikke lagre kategorien');
         }
     }
 
+    function cancelAddCategory() {
+        setAddingCategory(false);
+        setNewCategoryName('');
+        setCategoryError(null);
+    }
+
     async function deleteCategory(id: string) {
+        // Always keep at least one custom category
+        if (categories.length <= 1) return;
         if (!window.confirm('Slette kategorien? Oppgavene flyttes til I dag.')) return;
 
         setCategories(categories.filter(c => c.id !== id));
@@ -486,38 +497,53 @@ export default function TodoList() {
                         >
                             {cat.name.toUpperCase()} ({categoryCount(cat.id)})
                         </button>
-                        <button
-                            onClick={() => deleteCategory(cat.id)}
-                            className="hidden group-hover/cat:flex absolute -top-1.5 -right-1.5 bg-white shadow rounded-full p-0.5 text-slate-400 hover:text-red-600"
-                            title="Slett kategori"
-                        >
-                            <X className="w-3 h-3" />
-                        </button>
+                        {categories.length > 1 && (
+                            <button
+                                onClick={() => deleteCategory(cat.id)}
+                                className="hidden group-hover/cat:flex absolute -top-1.5 -right-1.5 bg-white shadow rounded-full p-0.5 text-slate-400 hover:text-red-600"
+                                title="Slett kategori"
+                            >
+                                <X className="w-3 h-3" />
+                            </button>
+                        )}
                     </div>
                 ))}
 
                 {categories.length < MAX_CUSTOM_CATEGORIES && (
                     addingCategory ? (
-                        <form onSubmit={handleAddCategory} className="flex-1 min-w-0 flex">
+                        <form onSubmit={handleAddCategory} className="relative flex-1 min-w-0 flex items-center">
                             <input
                                 autoFocus
                                 type="text"
                                 value={newCategoryName}
                                 maxLength={30}
                                 onChange={(e) => setNewCategoryName(e.target.value)}
-                                onBlur={() => {
-                                    if (!newCategoryName.trim()) setAddingCategory(false);
-                                }}
                                 onKeyDown={(e) => {
-                                    if (e.key === 'Escape') {
-                                        setAddingCategory(false);
-                                        setNewCategoryName('');
-                                    }
+                                    if (e.key === 'Escape') cancelAddCategory();
                                 }}
                                 placeholder="Navn..."
-                                className="w-full min-w-0 px-2 text-xs font-bold rounded-md border border-primary-300 focus:outline-none focus:ring-1 focus:ring-primary-500"
+                                className="w-full min-w-0 pl-2 pr-12 py-1.5 text-xs font-bold rounded-md border border-primary-300 focus:outline-none focus:ring-1 focus:ring-primary-500"
                             />
+                            <button
+                                type="submit"
+                                disabled={!newCategoryName.trim()}
+                                className="absolute right-6 p-0.5 text-primary-600 hover:bg-primary-50 rounded disabled:opacity-40"
+                                title="Lagre kategori"
+                            >
+                                <CheckCircle2 className="w-4 h-4" />
+                            </button>
+                            <button
+                                type="button"
+                                onClick={cancelAddCategory}
+                                className="absolute right-1 p-0.5 text-slate-400 hover:text-slate-700 rounded"
+                                title="Avbryt"
+                            >
+                                <X className="w-4 h-4" />
+                            </button>
                         </form>
+                        {categoryError && (
+                            <p className="absolute -bottom-5 left-0 text-[10px] text-red-600 whitespace-nowrap">{categoryError}</p>
+                        )}
                     ) : (
                         <button
                             onClick={() => setAddingCategory(true)}
