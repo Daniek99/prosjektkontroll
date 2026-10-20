@@ -14,9 +14,12 @@ import {
     ChevronDown,
     ChevronUp,
     Pencil,
-    GripVertical
+    GripVertical,
+    X
 } from 'lucide-react';
 import DatePickerWithWeek from './DatePickerWithWeek';
+
+const MAX_CUSTOM_CATEGORIES = 2;
 
 interface Task {
     id: string;
@@ -26,6 +29,13 @@ interface Task {
     is_starred?: boolean;
     due_date?: string;
     order_index: number;
+    category_id?: string | null;
+}
+
+interface TaskCategory {
+    id: string;
+    name: string;
+    position: number;
 }
 
 const toLocalDateString = (date: Date) => {
@@ -42,11 +52,33 @@ export default function TodoList() {
     const [editingId, setEditingId] = useState<string | null>(null);
     const [selectedTask, setSelectedTask] = useState<Task | null>(null);
     const [showCompleted, setShowCompleted] = useState(false);
-    const [activeTab, setActiveTab] = useState<'idag' | 'imorgen' | 'senere'>('idag');
+    const [activeTab, setActiveTab] = useState<string>('idag');
+    const [categories, setCategories] = useState<TaskCategory[]>([]);
+    const [addingCategory, setAddingCategory] = useState(false);
+    const [newCategoryName, setNewCategoryName] = useState('');
 
     useEffect(() => {
-        if (user) loadTasks();
+        if (user) {
+            loadTasks();
+            loadCategories();
+        }
     }, [user]);
+
+    async function loadCategories() {
+        if (!user) return;
+        const { data, error } = await supabase
+            .from('user_task_categories')
+            .select('*')
+            .eq('user_id', user.id)
+            .order('position', { ascending: true })
+            .order('created_at', { ascending: true });
+
+        if (!error && data) {
+            setCategories(data);
+        } else if (error) {
+            console.error("Error loading task categories:", error);
+        }
+    }
 
     async function loadTasks() {
         if (!user) return;
@@ -73,15 +105,19 @@ export default function TodoList() {
         e.preventDefault();
         if (!newTaskTitle.trim() || !user) return;
 
+        const activeCategory = categories.find(c => c.id === activeTab);
+
         let dueDate: string | null = null;
-        if (activeTab === 'imorgen') {
-            const tmrw = new Date();
-            tmrw.setDate(tmrw.getDate() + 1);
-            dueDate = toLocalDateString(tmrw);
-        } else if (activeTab === 'senere') {
-            const later = new Date();
-            later.setDate(later.getDate() + 2);
-            dueDate = toLocalDateString(later);
+        if (!activeCategory) {
+            if (activeTab === 'imorgen') {
+                const tmrw = new Date();
+                tmrw.setDate(tmrw.getDate() + 1);
+                dueDate = toLocalDateString(tmrw);
+            } else if (activeTab === 'senere') {
+                const later = new Date();
+                later.setDate(later.getDate() + 2);
+                dueDate = toLocalDateString(later);
+            }
         }
 
         const newTask = {
@@ -90,6 +126,7 @@ export default function TodoList() {
             is_completed: false,
             is_starred: false,
             due_date: dueDate,
+            category_id: activeCategory ? activeCategory.id : null,
             order_index: tasks.length
         };
 
@@ -176,13 +213,49 @@ export default function TodoList() {
         await supabase.from('user_tasks').update({ title: newTitle.trim() }).eq('id', id);
     }
 
-    const handleDropOnTab = async (e: React.DragEvent, tabName: 'idag' | 'imorgen' | 'senere') => {
+    async function handleAddCategory(e: React.FormEvent) {
+        e.preventDefault();
+        const name = newCategoryName.trim();
+        if (!name || !user || categories.length >= MAX_CUSTOM_CATEGORIES) return;
+
+        const { data, error } = await supabase
+            .from('user_task_categories')
+            .insert([{ name, user_id: user.id, position: categories.length }])
+            .select()
+            .single();
+
+        if (!error && data) {
+            setCategories([...categories, data]);
+            setNewCategoryName('');
+            setAddingCategory(false);
+            setActiveTab(data.id);
+        } else if (error) {
+            console.error("Error creating task category:", error);
+        }
+    }
+
+    async function deleteCategory(id: string) {
+        if (!window.confirm('Slette kategorien? Oppgavene flyttes til I dag.')) return;
+
+        setCategories(categories.filter(c => c.id !== id));
+        setTasks(tasks.map(t => t.category_id === id ? { ...t, category_id: null } : t));
+        if (activeTab === id) setActiveTab('idag');
+        await supabase.from('user_task_categories').delete().eq('id', id);
+    }
+
+    const handleDropOnTab = async (e: React.DragEvent, tabName: string) => {
         e.preventDefault();
         const taskId = e.dataTransfer.getData('taskId');
         if (!taskId) return;
 
         const task = tasks.find(t => t.id === taskId);
         if (!task) return;
+
+        // Custom category: store membership and clear the date
+        if (categories.some(c => c.id === tabName)) {
+            updateTaskDetails(taskId, { category_id: tabName, due_date: null as any });
+            return;
+        }
 
         let newDueDate: string | null = null;
         const todayD = new Date();
@@ -200,8 +273,10 @@ export default function TodoList() {
             newDueDate = toLocalDateString(todayD);
         }
 
-        updateTaskDetails(taskId, { due_date: newDueDate });
+        updateTaskDetails(taskId, { due_date: newDueDate as any, category_id: null });
     };
+
+    const activeCategory = categories.find(c => c.id === activeTab);
 
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -211,28 +286,35 @@ export default function TodoList() {
     const uncompletedTasks = tasks.filter(t => !t.is_completed);
     const completedTasks = tasks.filter(t => t.is_completed);
 
-    const todayTasks = uncompletedTasks.filter(t => {
+    // Tasks in custom categories are excluded from the date-based tabs
+    const dateBasedTasks = uncompletedTasks.filter(t => !t.category_id);
+
+    const todayTasks = dateBasedTasks.filter(t => {
         if (!t.due_date) return true;
         const d = new Date(t.due_date);
         d.setHours(0, 0, 0, 0);
         return d.getTime() <= today.getTime();
     });
 
-    const tomorrowTasks = uncompletedTasks.filter(t => {
+    const tomorrowTasks = dateBasedTasks.filter(t => {
         if (!t.due_date) return false;
         const d = new Date(t.due_date);
         d.setHours(0, 0, 0, 0);
         return d.getTime() === tomorrow.getTime();
     });
 
-    const laterTasks = uncompletedTasks.filter(t => {
+    const laterTasks = dateBasedTasks.filter(t => {
         if (!t.due_date) return false;
         const d = new Date(t.due_date);
         d.setHours(0, 0, 0, 0);
         return d.getTime() > tomorrow.getTime();
     });
 
-    const currentTasks = activeTab === 'idag' ? todayTasks : activeTab === 'imorgen' ? tomorrowTasks : laterTasks;
+    const categoryCount = (id: string) => uncompletedTasks.filter(t => t.category_id === id).length;
+
+    const currentTasks = activeCategory
+        ? uncompletedTasks.filter(t => t.category_id === activeCategory.id)
+        : activeTab === 'idag' ? todayTasks : activeTab === 'imorgen' ? tomorrowTasks : laterTasks;
 
     const renderTaskItem = (task: Task) => (
         <div
@@ -367,7 +449,7 @@ export default function TodoList() {
             </form>
 
             {/* Tabs */}
-            <div className="flex bg-slate-100 rounded-lg p-1 mb-4 flex-shrink-0">
+            <div className="flex bg-slate-100 rounded-lg p-1 mb-4 flex-shrink-0 gap-0.5">
                 <button
                     onClick={() => setActiveTab('idag')}
                     onDragOver={(e) => e.preventDefault()}
@@ -392,6 +474,60 @@ export default function TodoList() {
                 >
                     SENERE ({laterTasks.length})
                 </button>
+
+                {categories.map(cat => (
+                    <div key={cat.id} className="group/cat relative flex-1 min-w-0 flex">
+                        <button
+                            onClick={() => setActiveTab(cat.id)}
+                            onDragOver={(e) => e.preventDefault()}
+                            onDrop={(e) => handleDropOnTab(e, cat.id)}
+                            title={cat.name}
+                            className={`flex-1 min-w-0 truncate px-1 text-xs font-bold py-2 rounded-md transition-all ${activeTab === cat.id ? 'bg-white shadow text-primary-600' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-200/50'}`}
+                        >
+                            {cat.name.toUpperCase()} ({categoryCount(cat.id)})
+                        </button>
+                        <button
+                            onClick={() => deleteCategory(cat.id)}
+                            className="hidden group-hover/cat:flex absolute -top-1.5 -right-1.5 bg-white shadow rounded-full p-0.5 text-slate-400 hover:text-red-600"
+                            title="Slett kategori"
+                        >
+                            <X className="w-3 h-3" />
+                        </button>
+                    </div>
+                ))}
+
+                {categories.length < MAX_CUSTOM_CATEGORIES && (
+                    addingCategory ? (
+                        <form onSubmit={handleAddCategory} className="flex-1 min-w-0 flex">
+                            <input
+                                autoFocus
+                                type="text"
+                                value={newCategoryName}
+                                maxLength={30}
+                                onChange={(e) => setNewCategoryName(e.target.value)}
+                                onBlur={() => {
+                                    if (!newCategoryName.trim()) setAddingCategory(false);
+                                }}
+                                onKeyDown={(e) => {
+                                    if (e.key === 'Escape') {
+                                        setAddingCategory(false);
+                                        setNewCategoryName('');
+                                    }
+                                }}
+                                placeholder="Navn..."
+                                className="w-full min-w-0 px-2 text-xs font-bold rounded-md border border-primary-300 focus:outline-none focus:ring-1 focus:ring-primary-500"
+                            />
+                        </form>
+                    ) : (
+                        <button
+                            onClick={() => setAddingCategory(true)}
+                            className="flex-shrink-0 px-2 text-slate-400 hover:text-primary-600 hover:bg-slate-200/50 rounded-md transition-colors"
+                            title="Ny kategori"
+                        >
+                            <Plus className="w-4 h-4" />
+                        </button>
+                    )
+                )}
             </div>
 
             <div className="flex-1 overflow-y-auto pr-2 space-y-1 scrollbar-thin scrollbar-thumb-slate-200">
@@ -411,7 +547,11 @@ export default function TodoList() {
                             ) : (
                                 <div className="text-center py-6 text-sm text-slate-400 bg-slate-50 rounded-xl border border-dashed border-slate-200">
                                     <p className="font-medium text-slate-500">Ingen oppgaver i denne visningen</p>
-                                    <p className="mt-1 text-xs">Oppgaver lagt til her får automatisk oppdatert dato</p>
+                                    <p className="mt-1 text-xs">
+                                        {activeCategory
+                                            ? 'Oppgaver lagt til her havner i denne kategorien'
+                                            : 'Oppgaver lagt til her får automatisk oppdatert dato'}
+                                    </p>
                                 </div>
                             )}
                         </div>
