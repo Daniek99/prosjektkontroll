@@ -15,7 +15,8 @@ import {
     ChevronUp,
     Pencil,
     GripVertical,
-    X
+    X,
+    Repeat
 } from 'lucide-react';
 import DatePickerWithWeek from './DatePickerWithWeek';
 
@@ -30,6 +31,7 @@ interface Task {
     due_date?: string;
     order_index: number;
     category_id?: string | null;
+    recurrence?: string | null;
 }
 
 interface TaskCategory {
@@ -42,6 +44,24 @@ const toLocalDateString = (date: Date) => {
     const d = new Date(date);
     d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
     return d.toISOString().split('T')[0];
+};
+
+// Next due date for a recurring task, always in the future
+const nextOccurrence = (dueDate: string | undefined, recurrence: string) => {
+    const base = dueDate ? new Date(dueDate) : new Date();
+    base.setHours(0, 0, 0, 0);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const step = () => {
+        if (recurrence === 'daily') base.setDate(base.getDate() + 1);
+        else if (recurrence === 'weekly') base.setDate(base.getDate() + 7);
+        else if (recurrence === 'monthly') base.setMonth(base.getMonth() + 1);
+    };
+
+    step();
+    while (base.getTime() <= today.getTime()) step();
+    return toLocalDateString(base);
 };
 
 export default function TodoList() {
@@ -174,6 +194,34 @@ export default function TodoList() {
             .from('user_tasks')
             .update({ is_completed: newStatus })
             .eq('id', id);
+
+        // Recurring task: create the next occurrence when it is completed
+        if (newStatus) {
+            const task = tasks.find(t => t.id === id);
+            if (task?.recurrence && user) {
+                const { data, error } = await supabase
+                    .from('user_tasks')
+                    .insert([{
+                        title: task.title,
+                        description: task.description ?? null,
+                        user_id: user.id,
+                        is_completed: false,
+                        is_starred: false,
+                        due_date: nextOccurrence(task.due_date, task.recurrence),
+                        category_id: task.category_id ?? null,
+                        recurrence: task.recurrence,
+                        order_index: tasks.length
+                    }])
+                    .select()
+                    .single();
+
+                if (!error && data) {
+                    setTasks(prev => [data, ...prev]);
+                } else if (error) {
+                    console.error("Error creating recurring task:", error);
+                }
+            }
+        }
     }
 
     async function deleteTask(id: string) {
@@ -397,12 +445,17 @@ export default function TodoList() {
                     )}
 
                     {/* Task Metadata Indicators */}
-                    {(task.description || task.due_date) && !task.is_completed && (
+                    {(task.description || task.due_date || task.recurrence) && !task.is_completed && (
                         <div className="flex items-center space-x-2 mt-1">
                             {task.due_date && (
                                 <div className={`flex items-center text-[10px] font-bold ${new Date(task.due_date) < new Date(new Date().setHours(0, 0, 0, 0)) ? 'text-red-500' : 'text-primary-600'}`}>
                                     <Calendar className="w-3 h-3 mr-0.5" />
                                     {new Date(task.due_date).toLocaleDateString('no-NO', { day: 'numeric', month: 'short' })}
+                                </div>
+                            )}
+                            {task.recurrence && (
+                                <div className="flex items-center text-[10px] font-bold text-slate-400" title="Gjentas">
+                                    <Repeat className="w-3 h-3" />
                                 </div>
                             )}
                             {task.description && (
@@ -684,6 +737,20 @@ export default function TodoList() {
                                         Fjern
                                     </button>
                                 )}
+                            </div>
+
+                            <div className="flex items-center group">
+                                <Repeat className="w-5 h-5 text-slate-400 mr-3 group-hover:text-primary-500 transition-colors" />
+                                <select
+                                    value={selectedTask.recurrence || ''}
+                                    onChange={(e) => updateTaskDetails(selectedTask.id, { recurrence: (e.target.value || null) as any })}
+                                    className="bg-transparent border-none text-sm font-medium text-slate-600 focus:ring-0 focus:outline-none px-0 cursor-pointer hover:bg-slate-50 py-1 rounded"
+                                >
+                                    <option value="">Gjentas ikke</option>
+                                    <option value="daily">Hver dag</option>
+                                    <option value="weekly">Hver uke</option>
+                                    <option value="monthly">Hver måned</option>
+                                </select>
                             </div>
 
                             <div className="flex items-start group">

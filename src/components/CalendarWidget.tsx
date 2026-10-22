@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect } from 'react';
-import { Calendar as CalendarIcon, Plus, X, RefreshCw, Globe } from 'lucide-react';
+import { Calendar as CalendarIcon, Plus, X, RefreshCw, Globe, Repeat } from 'lucide-react';
 import { useGoogleLogin } from '@react-oauth/google';
 import { Calendar, dateFnsLocalizer, Views } from 'react-big-calendar';
 import type { Event as BigCalendarEventType, EventProps } from 'react-big-calendar';
@@ -36,6 +36,13 @@ interface CustomEvent extends BigCalendarEventType {
     sourceEvent: any;
 }
 
+// Read FREQ from a Google Calendar RRULE, e.g. "RRULE:FREQ=WEEKLY"
+const parseRecurrence = (sourceEvent: any): string => {
+    const rule: string | undefined = sourceEvent?.recurrence?.[0];
+    const match = rule?.match(/FREQ=(DAILY|WEEKLY|MONTHLY)/);
+    return match ? match[1] : 'none';
+};
+
 const messages = {
     allDay: 'Hele dagen',
     previous: 'Forrige',
@@ -58,13 +65,13 @@ export default function CalendarWidget() {
     const [isAuthenticated, setIsAuthenticated] = useState(false);
     const [accessToken, setAccessToken] = useState<string | null>(null);
     const [showAddModal, setShowAddModal] = useState(false);
-    const [newEvent, setNewEvent] = useState<{ title: string; date: string; time: string; duration: string }>({ title: '', date: '', time: '12:00', duration: '60' });
+    const [newEvent, setNewEvent] = useState<{ title: string; date: string; time: string; duration: string; recurrence: string }>({ title: '', date: '', time: '12:00', duration: '60', recurrence: 'none' });
     const [adding, setAdding] = useState(false);
     const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
     const [showEditModal, setShowEditModal] = useState(false);
     const [selectedEvent, setSelectedEvent] = useState<CustomEvent | null>(null);
-    const [editEventParams, setEditEventParams] = useState({ title: '', date: '', time: '12:00', duration: '60' });
+    const [editEventParams, setEditEventParams] = useState({ title: '', date: '', time: '12:00', duration: '60', recurrence: 'none' });
     const [updating, setUpdating] = useState(false);
     const [deleting, setDeleting] = useState(false);
 
@@ -196,7 +203,7 @@ export default function CalendarWidget() {
             const startDateTime = new Date(`${newEvent.date}T${newEvent.time}`);
             const endDateTime = new Date(startDateTime.getTime() + parseInt(newEvent.duration) * 60000);
 
-            const eventBody = {
+            const eventBody: Record<string, unknown> = {
                 summary: newEvent.title,
                 start: {
                     dateTime: startDateTime.toISOString(),
@@ -207,6 +214,9 @@ export default function CalendarWidget() {
                     timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone
                 }
             };
+            if (newEvent.recurrence !== 'none') {
+                eventBody.recurrence = [`RRULE:FREQ=${newEvent.recurrence}`];
+            }
 
             const response = await fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events', {
                 method: 'POST',
@@ -219,7 +229,7 @@ export default function CalendarWidget() {
 
             if (response.ok) {
                 setShowAddModal(false);
-                setNewEvent({ title: '', date: '', time: '12:00', duration: '60' });
+                setNewEvent({ title: '', date: '', time: '12:00', duration: '60', recurrence: 'none' });
                 fetchEvents(accessToken);
             } else {
                 alert('Kunne ikke opprette hendelse i Google Kalender');
@@ -295,7 +305,8 @@ export default function CalendarWidget() {
             title: '',
             date: format(start, 'yyyy-MM-dd'),
             time: format(start, 'HH:mm'),
-            duration: Math.round((end.getTime() - start.getTime()) / 60000).toString()
+            duration: Math.round((end.getTime() - start.getTime()) / 60000).toString(),
+            recurrence: 'none'
         });
         setShowAddModal(true);
     }, [isAuthenticated]);
@@ -307,7 +318,8 @@ export default function CalendarWidget() {
             title: event.title as string,
             date: event.start.toISOString().split('T')[0],
             time: event.start.toLocaleTimeString('no-NO', { hour: '2-digit', minute: '2-digit' }),
-            duration: Math.round((event.end.getTime() - event.start.getTime()) / 60000).toString()
+            duration: Math.round((event.end.getTime() - event.start.getTime()) / 60000).toString(),
+            recurrence: parseRecurrence(event.sourceEvent)
         });
         setShowEditModal(true);
     }, [isAuthenticated]);
@@ -320,7 +332,10 @@ export default function CalendarWidget() {
             let startDateTime = new Date(`${editEventParams.date}T${editEventParams.time}`);
             let endDateTime = new Date(startDateTime.getTime() + parseInt(editEventParams.duration) * 60000);
 
-            const response = await fetch(`https://www.googleapis.com/calendar/v3/calendars/primary/events/${selectedEvent.id}`, {
+            // Edit the whole series when the selected event is one occurrence
+            const targetId = selectedEvent.sourceEvent?.recurringEventId || selectedEvent.id;
+
+            const response = await fetch(`https://www.googleapis.com/calendar/v3/calendars/primary/events/${targetId}`, {
                 method: 'PATCH',
                 headers: {
                     Authorization: `Bearer ${accessToken}`,
@@ -329,7 +344,8 @@ export default function CalendarWidget() {
                 body: JSON.stringify({
                     summary: editEventParams.title,
                     start: { dateTime: startDateTime.toISOString(), timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone },
-                    end: { dateTime: endDateTime.toISOString(), timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone }
+                    end: { dateTime: endDateTime.toISOString(), timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone },
+                    recurrence: editEventParams.recurrence === 'none' ? [] : [`RRULE:FREQ=${editEventParams.recurrence}`]
                 })
             });
             if (response.ok) {
@@ -379,7 +395,10 @@ export default function CalendarWidget() {
     const EventComponent = ({ event }: EventProps<CustomEvent>) => {
         return (
             <div className="flex flex-col overflow-hidden h-full text-[11px] leading-snug px-1 pt-0.5" title={event.title as string}>
-                <div className="font-bold truncate">{event.title as string}</div>
+                <div className="font-bold truncate flex items-center gap-1">
+                    {event.sourceEvent?.recurrence?.length > 0 && <Repeat className="w-2.5 h-2.5 flex-shrink-0" />}
+                    <span className="truncate">{event.title as string}</span>
+                </div>
             </div>
         );
     }
@@ -454,7 +473,7 @@ export default function CalendarWidget() {
                             </button>
                             <button
                                 onClick={() => {
-                                    setNewEvent({ title: '', date: format(new Date(), 'yyyy-MM-dd'), time: '12:00', duration: '60' });
+                                    setNewEvent({ title: '', date: format(new Date(), 'yyyy-MM-dd'), time: '12:00', duration: '60', recurrence: 'none' });
                                     setShowAddModal(true);
                                 }}
                                 className="px-3 py-1.5 bg-primary-50 text-primary-700 text-xs font-bold rounded-lg uppercase tracking-widest hover:bg-primary-100 transition-colors flex items-center"
@@ -589,6 +608,20 @@ export default function CalendarWidget() {
                                 </select>
                             </div>
 
+                            <div>
+                                <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-1.5">Gjentakelse</label>
+                                <select
+                                    value={newEvent.recurrence}
+                                    onChange={e => setNewEvent({ ...newEvent, recurrence: e.target.value })}
+                                    className="w-full bg-slate-50 border border-slate-200 text-slate-900 text-sm rounded-xl focus:ring-2 focus:ring-[#4285F4]/20 focus:border-[#4285F4] block p-3 font-medium transition-all cursor-pointer"
+                                >
+                                    <option value="none">Gjentas ikke</option>
+                                    <option value="DAILY">Hver dag</option>
+                                    <option value="WEEKLY">Hver uke</option>
+                                    <option value="MONTHLY">Hver måned</option>
+                                </select>
+                            </div>
+
                             <div className="pt-4 flex justify-end gap-3 border-t border-slate-100 mt-6">
                                 <button
                                     type="button"
@@ -676,6 +709,20 @@ export default function CalendarWidget() {
                                     <option value="90">1.5 timer</option>
                                     <option value="120">2 timer</option>
                                     <option value="custom">Egendefinert</option>
+                                </select>
+                            </div>
+
+                            <div>
+                                <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-1.5">Gjentakelse</label>
+                                <select
+                                    value={editEventParams.recurrence}
+                                    onChange={e => setEditEventParams({ ...editEventParams, recurrence: e.target.value })}
+                                    className="w-full bg-slate-50 border border-slate-200 text-slate-900 text-sm rounded-xl focus:ring-2 focus:ring-[#4285F4]/20 focus:border-[#4285F4] block p-3 font-medium transition-all cursor-pointer"
+                                >
+                                    <option value="none">Gjentas ikke</option>
+                                    <option value="DAILY">Hver dag</option>
+                                    <option value="WEEKLY">Hver uke</option>
+                                    <option value="MONTHLY">Hver måned</option>
                                 </select>
                             </div>
 
