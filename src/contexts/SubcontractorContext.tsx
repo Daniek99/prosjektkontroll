@@ -1,5 +1,6 @@
-import { createContext, useContext, useState, useEffect } from 'react';
+import { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
+import { useProject } from './ProjectContext';
 
 type Subcontractor = {
     id: string;
@@ -22,12 +23,17 @@ type SubcontractorContextType = {
 const SubcontractorContext = createContext<SubcontractorContextType | undefined>(undefined);
 
 export const SubcontractorProvider = ({ children }: { children: React.ReactNode }) => {
+    const { selectedProjectId, loading: projectLoading } = useProject();
     const [subcontractors, setSubcontractors] = useState<Subcontractor[]>([]);
     const [selectedSubcontractorId, setSelectedSubcontractorId] = useState<string | null>(() => {
         return localStorage.getItem('gc-app-selected-sub') || null;
     });
 
-    const refreshSubcontractors = async () => {
+    const refreshSubcontractors = useCallback(async () => {
+        if (!selectedProjectId) {
+            setSubcontractors([]);
+            return;
+        }
         try {
             const { data, error } = await supabase
                 .from('subcontractors')
@@ -36,19 +42,22 @@ export const SubcontractorProvider = ({ children }: { children: React.ReactNode 
 
             if (!error && data) {
                 setSubcontractors(data);
-                // Auto-select first if none selected
-                if (data.length > 0 && !localStorage.getItem('gc-app-selected-sub')) {
-                    setSelectedSubcontractorId(data[0].id);
-                }
+                // Keep the current selection if it still exists in this project,
+                // otherwise auto-select the first subcontractor.
+                setSelectedSubcontractorId((current) => {
+                    if (current && data.some((s) => s.id === current)) return current;
+                    return data.length > 0 ? data[0].id : null;
+                });
             }
         } catch (err) {
             console.error(err);
         }
-    };
+    }, [selectedProjectId]);
 
     useEffect(() => {
+        if (projectLoading) return;
         refreshSubcontractors();
-    }, []);
+    }, [projectLoading, refreshSubcontractors]);
 
     useEffect(() => {
         if (selectedSubcontractorId) {

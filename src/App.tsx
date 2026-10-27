@@ -1,9 +1,11 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from './contexts/AuthContext';
+import { ProjectProvider } from './contexts/ProjectContext';
 import { GoogleOAuthProvider } from '@react-oauth/google';
 import { SubcontractorProvider } from './contexts/SubcontractorContext';
 import Layout from './components/Layout';
 import ProtectedRoute from './components/ProtectedRoute';
+import { RequireDataset, RequireMaster } from './components/RouteGuards';
 import Login from './components/Login';
 import ResetPassword from './pages/ResetPassword';
 import Dashboard from './pages/Dashboard';
@@ -19,6 +21,7 @@ import Decisions from './pages/Decisions';
 import Diary from './pages/Diary';
 import Contacts from './pages/Contacts';
 import Statistics from './pages/Statistics';
+import UserManagement from './pages/UserManagement';
 
 function App() {
   // Fallback is baked in so the production build works on Heroku without
@@ -30,31 +33,34 @@ function App() {
     <GoogleOAuthProvider clientId={googleClientId}>
       <BrowserRouter>
         <AuthProvider>
-          <SubcontractorProvider>
-            <Routes>
-              <Route path="/login" element={<Login />} />
-              <Route path="/reset-password" element={<ResetPassword />} />
+          <ProjectProvider>
+            <SubcontractorProvider>
+              <Routes>
+                <Route path="/login" element={<Login />} />
+                <Route path="/reset-password" element={<ResetPassword />} />
 
-              <Route element={<ProtectedRoute />}>
-                <Route element={<Layout />}>
-                  <Route path="/" element={<Dashboard />} />
-                  <Route path="/setup" element={<Prosjektoppsett />} />
-                  <Route path="/subcontractors" element={<Subcontractors />} />
-                  <Route path="/progress" element={<Progress />} />
-                  <Route path="/financials" element={<Financials />} />
-                  <Route path="/bemanning" element={<Bemanning />} />
-                  <Route path="/risks" element={<Risks />} />
-                  <Route path="/contracts" element={<Contracts />} />
-                  <Route path="/areas" element={<Areas />} />
-                  <Route path="/decisions" element={<Decisions />} />
-                  <Route path="/diary" element={<Diary />} />
-                  <Route path="/contacts" element={<Contacts />} />
-                  <Route path="/statistics" element={<Statistics />} />
-                  <Route path="*" element={<Navigate to="/" replace />} />
+                <Route element={<ProtectedRoute />}>
+                  <Route element={<Layout />}>
+                    <Route path="/" element={<RequireDataset dataset="dashboard"><Dashboard /></RequireDataset>} />
+                    <Route path="/setup" element={<RequireDataset dataset="setup"><Prosjektoppsett /></RequireDataset>} />
+                    <Route path="/subcontractors" element={<RequireDataset dataset="subcontractors"><Subcontractors /></RequireDataset>} />
+                    <Route path="/progress" element={<RequireDataset dataset="progress"><Progress /></RequireDataset>} />
+                    <Route path="/financials" element={<RequireDataset dataset="financials"><Financials /></RequireDataset>} />
+                    <Route path="/bemanning" element={<RequireDataset dataset="bemanning"><Bemanning /></RequireDataset>} />
+                    <Route path="/risks" element={<RequireDataset dataset="risks"><Risks /></RequireDataset>} />
+                    <Route path="/contracts" element={<RequireDataset dataset="contracts"><Contracts /></RequireDataset>} />
+                    <Route path="/areas" element={<RequireDataset dataset="areas"><Areas /></RequireDataset>} />
+                    <Route path="/decisions" element={<RequireDataset dataset="decisions"><Decisions /></RequireDataset>} />
+                    <Route path="/diary" element={<RequireDataset dataset="diary"><Diary /></RequireDataset>} />
+                    <Route path="/contacts" element={<RequireDataset dataset="contacts"><Contacts /></RequireDataset>} />
+                    <Route path="/statistics" element={<RequireDataset dataset="statistics"><Statistics /></RequireDataset>} />
+                    <Route path="/admin" element={<RequireMaster><UserManagement /></RequireMaster>} />
+                    <Route path="*" element={<Navigate to="/" replace />} />
+                  </Route>
                 </Route>
-              </Route>
-            </Routes>
-          </SubcontractorProvider>
+              </Routes>
+            </SubcontractorProvider>
+          </ProjectProvider>
         </AuthProvider>
       </BrowserRouter>
     </GoogleOAuthProvider>

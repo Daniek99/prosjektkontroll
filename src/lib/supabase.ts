@@ -10,7 +10,37 @@ const FALLBACK_SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3M
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || FALLBACK_SUPABASE_URL
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || FALLBACK_SUPABASE_ANON_KEY
 
+// ---------------------------------------------------------------------------
+// Project scoping
+// ---------------------------------------------------------------------------
+// The database uses Row Level Security that reads the currently selected
+// project from the `x-project-id` request header. Keeping the value in a
+// module-level variable lets us inject it into every request (including
+// storage uploads) without touching any of the existing queries.
+let currentProjectId: string | null = null
+
+export function setCurrentProjectId(id: string | null) {
+    currentProjectId = id
+}
+
+export function getCurrentProjectId() {
+    return currentProjectId
+}
+
+const projectAwareFetch: typeof fetch = (input, init) => {
+    // Preserve headers supplied through either a Request object or fetch init.
+    const headers = new Headers(input instanceof Request ? input.headers : undefined)
+    new Headers(init?.headers).forEach((value, key) => headers.set(key, value))
+    if (currentProjectId) {
+        headers.set('x-project-id', currentProjectId)
+    }
+    return fetch(input, { ...init, headers })
+}
+
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+    global: {
+        fetch: projectAwareFetch,
+    },
     auth: {
         persistSession: true,
         storageKey: 'gc-app-auth',
