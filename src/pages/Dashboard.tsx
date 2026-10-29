@@ -8,6 +8,7 @@ import ManpowerWidget from '../components/ManpowerWidget';
 import ActivityRegisterWidget from '../components/ActivityRegisterWidget';
 import OutlookMailWidget from '../components/OutlookMailWidget';
 import AutomationsWidget from '../components/AutomationsWidget';
+import NotesWidget from '../components/NotesWidget';
 
 
 export default function Dashboard() {
@@ -335,6 +336,9 @@ export default function Dashboard() {
                             <ActivityRegisterWidget selectedSubcontractorId={selectedDashboardSubcontractorId} />
                         </div>
                     </div>
+
+                    {/* Notes widget — sits directly below Bemanning + Activities */}
+                    <NotesWidget selectedSubcontractorId={selectedDashboardSubcontractorId} />
                 </div>
 
                 {/* Right column: Calendar + Automations */}
