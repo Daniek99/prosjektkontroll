@@ -1044,19 +1044,25 @@ export default function Progress() {
                     <h1 className="text-2xl font-extrabold text-slate-900 tracking-tight">Fremdriftskontroll</h1>
                     <p className="text-slate-500 font-medium text-sm mt-1">Dokumenter fremdrift på byggeplass med bilder</p>
                 </div>
-                <div className="flex items-center gap-3 flex-wrap">
-                    <PageSubcontractorSelector value={selectedSubcontractorId} onChange={setSelectedSubcontractorId} />
-                    <button
-                        onClick={() => {
-                            setNewPhoto({ area: '', area_id: '', photo_url: '', notes: '', date: new Date().toISOString().split('T')[0] });
-                            setShowModal(true);
-                        }}
-                        className="bg-primary-600 text-white px-5 py-2.5 rounded-xl font-bold text-sm shadow-[0_4px_12px_rgba(37,99,235,0.25)] hover:bg-primary-700 hover:-translate-y-0.5 transition-all flex items-center shrink-0"
-                    >
-                        <Plus className="w-4 h-4 mr-2" />
-                        Last opp bilde
-                    </button>
+                <button
+                    onClick={() => {
+                        setNewPhoto({ area: '', area_id: '', photo_url: '', notes: '', date: new Date().toISOString().split('T')[0] });
+                        setShowModal(true);
+                    }}
+                    className="bg-primary-600 text-white px-5 py-2.5 rounded-xl font-bold text-sm shadow-[0_4px_12px_rgba(37,99,235,0.25)] hover:bg-primary-700 hover:-translate-y-0.5 transition-all flex items-center shrink-0"
+                >
+                    <Plus className="w-4 h-4 mr-2" />
+                    Last opp bilde
+                </button>
+            </div>
+
+            {/* Prominent subcontractor selector for the project plan */}
+            <div className="bg-white p-4 sm:p-5 rounded-3xl border border-slate-200/60 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                    <h2 className="text-sm font-extrabold text-slate-800">Velg underentreprenør for prosjektplanen</h2>
+                    <p className="text-xs text-slate-500 font-medium mt-0.5">Fremdriftsplanen og bildene nedenfor gjelder valgt underentreprenør.</p>
                 </div>
+                <PageSubcontractorSelector value={selectedSubcontractorId} onChange={setSelectedSubcontractorId} />
             </div>
 
             {/* Progress Plan Section */}
@@ -1349,7 +1355,7 @@ export default function Progress() {
 
             {/* Activity Register Section */}
             <div className="bg-white border border-slate-200 rounded-3xl p-6 sm:p-8 mt-8 shadow-sm">
-                <div className="flex justify-between items-center mb-6">
+                <div className="flex justify-between items-center mb-4">
                     <div>
                         <h2 className="text-xl font-extrabold text-slate-800 flex items-center">
                             <CalendarIcon className="w-5 h-5 mr-3 text-primary-500" />
@@ -1357,44 +1363,49 @@ export default function Progress() {
                         </h2>
                         <p className="text-slate-500 text-sm mt-1.5 font-medium">Spor datoer for oppstart, forventet ferdig og frister.</p>
                     </div>
-                    <div className="flex items-center gap-3 flex-wrap">
-                        <div className="relative">
-                            <button onClick={() => setShowActivitySubDropdown(!showActivitySubDropdown)} className="bg-slate-100 text-slate-700 px-4 py-2.5 rounded-xl font-bold text-sm hover:bg-slate-200 transition-colors flex items-center shrink-0">
-                                <Users className="w-4 h-4 mr-2" />
-                                Velg UE ({activitySubIds.length})
-                            </button>
-                            {showActivitySubDropdown && (
-                                <>
-                                    <div className="fixed inset-0 z-40" onClick={() => setShowActivitySubDropdown(false)} />
-                                    <div className="absolute right-0 mt-2 w-80 bg-white rounded-2xl shadow-xl border border-slate-200 z-50 max-h-96 overflow-hidden flex flex-col">
-                                        <div className="px-4 py-3 border-b border-slate-100 bg-slate-50 flex items-center justify-between">
-                                            <span className="text-xs font-bold text-slate-600 uppercase tracking-widest">Underentreprenører</span>
-                                            <div className="flex gap-2">
-                                                <button onClick={() => setActivitySubIds(subcontractors.map(s => s.id))} className="text-[10px] font-bold text-primary-600 hover:text-primary-700">Velg alle</button>
-                                                <button onClick={() => setActivitySubIds([])} className="text-[10px] font-bold text-red-500 hover:text-red-600">Fjern alle</button>
-                                            </div>
-                                        </div>
-                                        <div className="overflow-y-auto flex-1 p-2">
-                                            {subcontractors.map(s => (
-                                                <label key={s.id} className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-slate-50 cursor-pointer">
-                                                    <input
-                                                        type="checkbox"
-                                                        checked={activitySubIds.includes(s.id)}
-                                                        onChange={() => setActivitySubIds(prev => prev.includes(s.id) ? prev.filter(id => id !== s.id) : [...prev, s.id])}
-                                                        className="w-3.5 h-3.5 text-primary-600 border-slate-300 rounded focus:ring-primary-500"
-                                                    />
-                                                    <span className="text-xs font-bold text-slate-700 truncate flex-1">{s.company_name}</span>
-                                                </label>
-                                            ))}
+                    <button onClick={() => { setCurrentTask({}); setShowTaskModal(true); }} className="bg-primary-600 text-white px-4 py-2.5 rounded-xl font-bold text-sm shadow flex items-center hover:bg-primary-700 transition">
+                        <Plus className="w-4 h-4 mr-2" />
+                        Ny Aktivitet
+                    </button>
+                </div>
+
+                {/* Prominent, centered subcontractor selector for the activity register */}
+                <div className="flex justify-center mb-6">
+                    <div className="relative">
+                        <button
+                            onClick={() => setShowActivitySubDropdown(!showActivitySubDropdown)}
+                            className="bg-primary-600 text-white px-6 py-3 rounded-xl font-extrabold text-sm shadow-lg shadow-primary-500/30 hover:bg-primary-700 hover:-translate-y-0.5 transition-all flex items-center gap-2"
+                        >
+                            <Users className="w-5 h-5" />
+                            Velg underentreprenører ({activitySubIds.length})
+                        </button>
+                        {showActivitySubDropdown && (
+                            <>
+                                <div className="fixed inset-0 z-40" onClick={() => setShowActivitySubDropdown(false)} />
+                                <div className="absolute left-1/2 -translate-x-1/2 mt-2 w-80 bg-white rounded-2xl shadow-xl border border-slate-200 z-50 max-h-96 overflow-hidden flex flex-col">
+                                    <div className="px-4 py-3 border-b border-slate-100 bg-slate-50 flex items-center justify-between">
+                                        <span className="text-xs font-bold text-slate-600 uppercase tracking-widest">Underentreprenører</span>
+                                        <div className="flex gap-2">
+                                            <button onClick={() => setActivitySubIds(subcontractors.map(s => s.id))} className="text-[10px] font-bold text-primary-600 hover:text-primary-700">Velg alle</button>
+                                            <button onClick={() => setActivitySubIds([])} className="text-[10px] font-bold text-red-500 hover:text-red-600">Fjern alle</button>
                                         </div>
                                     </div>
-                                </>
-                            )}
-                        </div>
-                        <button onClick={() => { setCurrentTask({}); setShowTaskModal(true); }} className="bg-primary-600 text-white px-4 py-2.5 rounded-xl font-bold text-sm shadow flex items-center hover:bg-primary-700 transition">
-                            <Plus className="w-4 h-4 mr-2" />
-                            Ny Aktivitet
-                        </button>
+                                    <div className="overflow-y-auto flex-1 p-2">
+                                        {subcontractors.map(s => (
+                                            <label key={s.id} className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-slate-50 cursor-pointer">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={activitySubIds.includes(s.id)}
+                                                    onChange={() => setActivitySubIds(prev => prev.includes(s.id) ? prev.filter(id => id !== s.id) : [...prev, s.id])}
+                                                    className="w-3.5 h-3.5 text-primary-600 border-slate-300 rounded focus:ring-primary-500"
+                                                />
+                                                <span className="text-xs font-bold text-slate-700 truncate flex-1">{s.company_name}</span>
+                                            </label>
+                                        ))}
+                                    </div>
+                                </div>
+                            </>
+                        )}
                     </div>
                 </div>
                 {progressTasks.length === 0 ? (
