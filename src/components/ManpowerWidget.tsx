@@ -7,9 +7,9 @@ import DatePickerWithWeek from './DatePickerWithWeek';
 import { toLocalDateString } from '../lib/utils';
 
 export default function ManpowerWidget({ selectedSubcontractorId: propSelectedSubcontractorId }: { selectedSubcontractorId?: string | null }) {
-    const { selectedSubcontractorId: contextSelectedSubcontractorId, setSelectedSubcontractorId, subcontractors } = useSubcontractor();
+    const { subcontractors } = useSubcontractor();
     const navigate = useNavigate();
-    const selectedSubcontractorId = propSelectedSubcontractorId ?? contextSelectedSubcontractorId;
+    const selectedSubcontractorId = propSelectedSubcontractorId ?? null;
     const [contractWorkers, setContractWorkers] = useState<number | string>('');
     const [billableWorkers, setBillableWorkers] = useState<number | string>('');
     const [totalWorkers, setTotalWorkers] = useState<number | string>('');
@@ -351,8 +351,7 @@ export default function ManpowerWidget({ selectedSubcontractorId: propSelectedSu
         setBillCommentBySub(prev => ({ ...prev, [subId]: comment }));
     }
 
-    function openFullBemanningForSub(subId: string) {
-        setSelectedSubcontractorId(subId);
+    function openFullBemanningForSub(_subId: string) {
         setAllMode(false);
         navigate('/bemanning');
     }

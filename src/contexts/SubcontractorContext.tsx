@@ -13,8 +13,6 @@ type Subcontractor = {
 };
 
 type SubcontractorContextType = {
-    selectedSubcontractorId: string | null;
-    setSelectedSubcontractorId: (id: string | null) => void;
     subcontractors: Subcontractor[];
     setSubcontractors: React.Dispatch<React.SetStateAction<Subcontractor[]>>;
     refreshSubcontractors: () => Promise<void>;
@@ -25,9 +23,6 @@ const SubcontractorContext = createContext<SubcontractorContextType | undefined>
 export const SubcontractorProvider = ({ children }: { children: React.ReactNode }) => {
     const { selectedProjectId, loading: projectLoading } = useProject();
     const [subcontractors, setSubcontractors] = useState<Subcontractor[]>([]);
-    const [selectedSubcontractorId, setSelectedSubcontractorId] = useState<string | null>(() => {
-        return localStorage.getItem('gc-app-selected-sub') || null;
-    });
 
     const refreshSubcontractors = useCallback(async () => {
         if (!selectedProjectId) {
@@ -42,12 +37,6 @@ export const SubcontractorProvider = ({ children }: { children: React.ReactNode 
 
             if (!error && data) {
                 setSubcontractors(data);
-                // Keep the current selection if it still exists in this project,
-                // otherwise auto-select the first subcontractor.
-                setSelectedSubcontractorId((current) => {
-                    if (current && data.some((s) => s.id === current)) return current;
-                    return data.length > 0 ? data[0].id : null;
-                });
             }
         } catch (err) {
             console.error(err);
@@ -59,18 +48,8 @@ export const SubcontractorProvider = ({ children }: { children: React.ReactNode 
         refreshSubcontractors();
     }, [projectLoading, refreshSubcontractors]);
 
-    useEffect(() => {
-        if (selectedSubcontractorId) {
-            localStorage.setItem('gc-app-selected-sub', selectedSubcontractorId);
-        } else {
-            localStorage.removeItem('gc-app-selected-sub');
-        }
-    }, [selectedSubcontractorId]);
-
     return (
         <SubcontractorContext.Provider value={{
-            selectedSubcontractorId,
-            setSelectedSubcontractorId,
             subcontractors,
             setSubcontractors,
             refreshSubcontractors

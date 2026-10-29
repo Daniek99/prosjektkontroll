@@ -19,8 +19,8 @@ interface Activity {
 }
 
 export default function ActivityRegisterWidget({ selectedSubcontractorId: propSelectedSubcontractorId }: { selectedSubcontractorId?: string | null }) {
-    const { selectedSubcontractorId: contextSelectedSubcontractorId, subcontractors } = useSubcontractor();
-    const selectedSubcontractorId = propSelectedSubcontractorId ?? contextSelectedSubcontractorId;
+    const { subcontractors } = useSubcontractor();
+    const selectedSubcontractorId = propSelectedSubcontractorId ?? null;
     const navigate = useNavigate();
     const [activities, setActivities] = useState<Activity[]>([]);
     const [loading, setLoading] = useState(true);

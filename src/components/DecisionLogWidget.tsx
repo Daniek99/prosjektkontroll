@@ -31,11 +31,11 @@ const VISIBLE_OPTIONS = [
 ];
 
 export default function DecisionLogWidget({ selectedSubcontractorId: propSelectedSubcontractorId }: { selectedSubcontractorId?: string | null }) {
-    const { selectedSubcontractorId: contextSelectedSubcontractorId, subcontractors } = useSubcontractor();
+    const { subcontractors } = useSubcontractor();
     const { canAccess } = useProject();
     const { user } = useAuth();
     const navigate = useNavigate();
-    const selectedSubcontractorId = propSelectedSubcontractorId ?? contextSelectedSubcontractorId;
+    const selectedSubcontractorId = propSelectedSubcontractorId ?? null;
 
     const [expanded, setExpanded] = useState(false);
     const [logs, setLogs] = useState<DecisionLog[]>([]);
