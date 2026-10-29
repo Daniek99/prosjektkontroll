@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
+import { useProject } from '../contexts/ProjectContext';
 import { supabase } from '../lib/supabase';
 import { Users, Plus, Mail, Phone, Search, X, CheckSquare, Square, Trash2, Edit2, ListPlus, ChevronDown, ChevronUp, Building2, Copy, Check } from 'lucide-react';
 
@@ -29,7 +30,9 @@ interface BulkContact {
 
 export default function Contacts() {
     const { user } = useAuth();
+    const { selectedProjectId } = useProject();
     const [contacts, setContacts] = useState<Contact[]>([]);
+    const [contactGroups, setContactGroups] = useState<string[]>([]);
     const [subcontractors, setSubcontractors] = useState<Subcontractor[]>([]);
     const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
@@ -62,6 +65,8 @@ export default function Contacts() {
         setLoading(true);
         const { data: subData } = await supabase.from('subcontractors').select('id, company_name').order('company_name');
         if (subData) setSubcontractors(subData);
+        const { data: groupData } = await supabase.from('contact_groups').select('name').order('name');
+        if (groupData) setContactGroups(groupData.map((g: { name: string }) => g.name));
         const { data, error } = await supabase.from('contacts').select('*').order('name');
         if (!error && data) {
             setContacts(data);
@@ -73,15 +78,25 @@ export default function Contacts() {
         setLoading(false);
     }
 
+    // Contact groups are a property of the project. Make sure a group exists
+    // whenever a contact is saved with a category.
+    async function ensureGroup(name: string) {
+        if (!name || !selectedProjectId) return;
+        await supabase
+            .from('contact_groups')
+            .upsert([{ project_id: selectedProjectId, name }], { onConflict: 'project_id,name' });
+    }
+
     async function handleAddContact(e: React.FormEvent) {
         e.preventDefault();
         if (!user) return;
         if (!contactForm.name.trim()) { alert('Navn er påkrevd.'); return; }
         if (!contactForm.email.trim() && !contactForm.phone.trim()) { alert('Vennligst fyll inn enten e-post eller telefonnummer.'); return; }
         const finalCategory = contactForm.category === '_custom_' ? newCustomCategory : contactForm.category;
-        const payload = { ...contactForm, category: finalCategory, created_by: user.id, subcontractor_id: null };
+        const payload = { ...contactForm, category: finalCategory, created_by: user.id, user_id: user.id, subcontractor_id: null };
         const { error } = await supabase.from('contacts').insert([payload]);
         if (!error) {
+            await ensureGroup(finalCategory);
             setIsContactModalOpen(false);
             setContactForm({ name: '', email: '', phone: '', role: '', category: '', company: '' });
             setNewCustomCategory('');
@@ -93,7 +108,7 @@ export default function Contacts() {
         if (!editForm.name.trim()) return;
         const finalCategory = editForm.category === '_custom_' ? editCustomCategory : editForm.category;
         const { error } = await supabase.from('contacts').update({ name: editForm.name, email: editForm.email, phone: editForm.phone, role: editForm.role, category: finalCategory, company: editForm.company }).eq('id', id);
-        if (!error) { setEditingContactId(null); setEditCustomCategory(''); loadContacts(); }
+        if (!error) { await ensureGroup(finalCategory); setEditingContactId(null); setEditCustomCategory(''); loadContacts(); }
     }
 
     async function handleDeleteContact(id: string) {
@@ -177,12 +192,14 @@ export default function Contacts() {
             role: '',
             category: finalCategory,
             created_by: user.id,
+            user_id: user.id,
             subcontractor_id: null,
         }));
 
         const { error } = await supabase.from('contacts').insert(payloads);
         setBulkSaving(false);
         if (!error) {
+            await ensureGroup(finalCategory);
             setIsBulkModalOpen(false);
             setBulkCategory('');
             setBulkCustomCategory('');
@@ -267,7 +284,10 @@ export default function Contacts() {
         return matchesSearch && matchesRole && matchesCompany;
     });
 
-    const existingCategories = [...new Set(contacts.map(c => c.category).filter(Boolean))].sort();
+    const existingCategories = [...new Set([
+        ...contacts.map(c => c.category).filter(Boolean),
+        ...contactGroups,
+    ])].sort();
     const existingRoles = [...new Set(contacts.map(c => c.role).filter(Boolean))].sort();
     const existingCompanies = [...new Set(contacts.map(c => c.company).filter(Boolean))].sort();
 

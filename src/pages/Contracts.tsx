@@ -2,7 +2,8 @@ import { useState, useEffect, useRef } from 'react';
 import { FileSpreadsheet, UploadCloud, FileDown, Plus, X, Image as ImageIcon, FileText, Loader2, Edit, Trash2 } from 'lucide-react';
 import Papa from 'papaparse';
 import { supabase } from '../lib/supabase';
-import { useSubcontractor } from '../contexts/SubcontractorContext';
+import { usePageSubcontractor } from '../hooks/usePageSubcontractor';
+import PageSubcontractorSelector from '../components/PageSubcontractorSelector';
 
 interface ContractItem {
     id: string;
@@ -16,7 +17,7 @@ interface ContractItem {
 }
 
 export default function Contracts() {
-    const { selectedSubcontractorId } = useSubcontractor();
+    const { selectedSubcontractorId, setSelectedSubcontractorId } = usePageSubcontractor();
     const selectedSubId = selectedSubcontractorId;
     const [items, setItems] = useState<ContractItem[]>([]);
     const [loading, setLoading] = useState(true);
@@ -421,6 +422,7 @@ export default function Contracts() {
                     <h1 className="text-2xl font-extrabold text-slate-900 tracking-tight">Kontraktdetaljer</h1>
                     <p className="text-slate-500 font-medium text-sm mt-1">Mengdebeskrivelse og avtalt enhetspris register</p>
                 </div>
+                <PageSubcontractorSelector value={selectedSubcontractorId} onChange={setSelectedSubcontractorId} />
                 <div className="flex gap-3">
                     <input
                         type="file"

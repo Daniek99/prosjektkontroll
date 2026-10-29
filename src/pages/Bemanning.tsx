@@ -1,12 +1,12 @@
 import { useEffect, useState, useRef, Fragment } from 'react';
-import { useSubcontractor } from '../contexts/SubcontractorContext';
 import { supabase } from '../lib/supabase';
+import { usePageSubcontractor } from '../hooks/usePageSubcontractor';
 import { Users, Plus, X, Edit2, Trash2, ChevronLeft, ChevronRight, Clock, Settings, ClipboardList, Minus, Check, Copy, Repeat } from 'lucide-react';
 import DatePickerWithWeek from '../components/DatePickerWithWeek';
 import { toLocalDateString } from '../lib/utils';
 
 export default function Bemanning() {
-    const { selectedSubcontractorId, setSelectedSubcontractorId, subcontractors } = useSubcontractor();
+    const { selectedSubcontractorId, setSelectedSubcontractorId, subcontractors } = usePageSubcontractor();
     const [manpower, setManpower] = useState<any[]>([]);
     const [activities, setActivities] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);

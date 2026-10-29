@@ -36,7 +36,7 @@ interface EngineeringFile {
 interface Area { id: string; building: string; floor: string; zone: string; }
 
 export default function Decisions() {
-    const { selectedSubcontractorId, subcontractors } = useSubcontractor();
+    const { subcontractors } = useSubcontractor();
     const [logs, setLogs] = useState<DecisionLog[]>([]);
     const [files, setFiles] = useState<EngineeringFile[]>([]);
     const [folders, setFolders] = useState<EngineeringFolder[]>([]);

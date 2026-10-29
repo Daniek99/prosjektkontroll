@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { supabase } from '../lib/supabase';
-import { useSubcontractor } from '../contexts/SubcontractorContext';
 import { useProject } from '../contexts/ProjectContext';
 import { useAuth } from '../contexts/AuthContext';
 import {
@@ -34,7 +33,6 @@ interface NoteSection {
 }
 
 export default function Diary() {
-    const { selectedSubcontractorId } = useSubcontractor();
     const { selectedProjectId, selectedProject } = useProject();
     const { user } = useAuth();
 
@@ -121,20 +119,17 @@ export default function Diary() {
     }, [user, selectedProjectId, selectedProject?.name]);
 
     const loadEntries = useCallback(async () => {
-        if (!selectedSubcontractorId) {
-            setEntries([]);
-            return;
-        }
+        // Notes are a property of the user and the project. RLS scopes the
+        // query to the signed-in user and the selected project.
         const { data, error } = await supabase
             .from('diary_entries')
             .select('*')
-            .eq('subcontractor_id', selectedSubcontractorId)
             .order('date', { ascending: false });
 
         if (!error && data) {
             setEntries(data as DiaryEntry[]);
         }
-    }, [selectedSubcontractorId]);
+    }, []);
 
     const loadAll = useCallback(async () => {
         setLoading(true);
@@ -209,11 +204,11 @@ export default function Diary() {
 
     const handleAddEntry = async (e: React.FormEvent) => {
         e.preventDefault();
-        if (!selectedSubcontractorId) return;
+        if (!user) return;
         setLoading(true);
 
         const payload = {
-            subcontractor_id: selectedSubcontractorId,
+            user_id: user.id,
             date: newEntry.date,
             content: newEntry.content,
             weather: newEntry.weather
@@ -403,24 +398,12 @@ export default function Diary() {
         return <Cloud className="w-4 h-4 text-slate-500" />;
     };
 
-    if (!selectedSubcontractorId) {
-        return (
-            <div className="flex flex-col items-center justify-center py-20 bg-white rounded-3xl border border-dashed border-slate-300">
-                <div className="bg-slate-50 p-6 rounded-full mb-6 ring-8 ring-slate-50/50">
-                    <BookOpen className="w-16 h-16 text-slate-300" />
-                </div>
-                <h3 className="text-xl font-extrabold text-slate-700">Ingen underentreprenør valgt</h3>
-                <p className="text-slate-500 text-center mt-3 font-medium">Vennligst velg en underentreprenør for å skrive notater.</p>
-            </div>
-        );
-    }
-
     return (
         <div className="space-y-6 max-w-6xl mx-auto">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-6 rounded-3xl shadow-sm border border-slate-200/60">
                 <div>
                     <h1 className="text-2xl font-extrabold text-slate-900 tracking-tight">Notater</h1>
-                    <p className="text-slate-500 font-medium text-sm mt-1">Personlige mapper og seksjoner for underentreprenøren</p>
+                    <p className="text-slate-500 font-medium text-sm mt-1">Personlige mapper og seksjoner for prosjektet</p>
                 </div>
                 <button
                     onClick={() => { resetForm(); setShowModal(true); }}

@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
-import { useSubcontractor } from '../contexts/SubcontractorContext';
 import { supabase } from '../lib/supabase';
 import { Map, MapPin, Building, Layers, CheckSquare, Square } from 'lucide-react';
+import { usePageSubcontractor } from '../hooks/usePageSubcontractor';
+import PageSubcontractorSelector from '../components/PageSubcontractorSelector';
 
 interface GlobalArea {
     id: string;
@@ -12,7 +13,7 @@ interface GlobalArea {
 }
 
 export default function Areas() {
-    const { selectedSubcontractorId } = useSubcontractor();
+    const { selectedSubcontractorId, setSelectedSubcontractorId } = usePageSubcontractor();
     const [globalAreas, setGlobalAreas] = useState<GlobalArea[]>([]);
     const [assignedAreaIds, setAssignedAreaIds] = useState<Set<string>>(new Set());
     const [loading, setLoading] = useState(true);
@@ -127,6 +128,7 @@ export default function Areas() {
                     <h1 className="text-2xl font-extrabold text-slate-900 tracking-tight">Tildel Områder</h1>
                     <p className="text-slate-500 font-medium text-sm mt-1">Velg hvilke av prosjektets områder som er relevante for denne underentreprenøren</p>
                 </div>
+                <PageSubcontractorSelector value={selectedSubcontractorId} onChange={setSelectedSubcontractorId} />
             </div>
 
             {loading ? (

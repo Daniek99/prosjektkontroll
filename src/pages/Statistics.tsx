@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, Fragment } from 'react';
-import { useSubcontractor } from '../contexts/SubcontractorContext';
 import { supabase } from '../lib/supabase';
+import { usePageSubcontractor } from '../hooks/usePageSubcontractor';
+import PageSubcontractorSelector from '../components/PageSubcontractorSelector';
 import {
     BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
     PieChart, Pie, Cell, Legend
@@ -10,7 +11,7 @@ import { Calendar, DollarSign, Users, AlertCircle, CheckCircle2, TrendingUp, Pre
 type Period = '7d' | '30d' | '90d' | 'this_year' | 'all_time';
 
 export default function Statistics() {
-    const { selectedSubcontractorId } = useSubcontractor();
+    const { selectedSubcontractorId, setSelectedSubcontractorId } = usePageSubcontractor();
     const [period, setPeriod] = useState<Period>('30d');
     const [loading, setLoading] = useState(true);
     const [manpower, setManpower] = useState<any[]>([]);
@@ -169,19 +170,22 @@ export default function Statistics() {
                     </h1>
                     <p className="text-slate-500 font-medium text-sm mt-1">Oppsummerer data for prosjektperioden</p>
                 </div>
-                <div className="flex items-center gap-2 bg-slate-100 p-1.5 rounded-xl self-stretch sm:self-auto overflow-x-auto">
-                    {[
-                        { id: '7d', label: '7 dager' },
-                        { id: '30d', label: '30 dager' },
-                        { id: '90d', label: '3 mnd' },
-                        { id: 'this_year', label: 'I år' },
-                        { id: 'all_time', label: 'Alt' }
-                    ].map(p => (
-                        <button key={p.id} onClick={() => setPeriod(p.id as Period)}
-                            className={`px-4 py-2 text-sm font-bold rounded-lg transition-all whitespace-nowrap ${period === p.id ? 'bg-white text-primary-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
-                            {p.label}
-                        </button>
-                    ))}
+                <div className="flex items-center gap-3 flex-wrap">
+                    <PageSubcontractorSelector value={selectedSubcontractorId} onChange={setSelectedSubcontractorId} />
+                    <div className="flex items-center gap-2 bg-slate-100 p-1.5 rounded-xl self-stretch sm:self-auto overflow-x-auto">
+                        {[
+                            { id: '7d', label: '7 dager' },
+                            { id: '30d', label: '30 dager' },
+                            { id: '90d', label: '3 mnd' },
+                            { id: 'this_year', label: 'I år' },
+                            { id: 'all_time', label: 'Alt' }
+                        ].map(p => (
+                            <button key={p.id} onClick={() => setPeriod(p.id as Period)}
+                                className={`px-4 py-2 text-sm font-bold rounded-lg transition-all whitespace-nowrap ${period === p.id ? 'bg-white text-primary-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
+                                {p.label}
+                            </button>
+                        ))}
+                    </div>
                 </div>
             </div>
 

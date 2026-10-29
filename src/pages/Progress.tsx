@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef } from 'react';
-import { useSubcontractor } from '../contexts/SubcontractorContext';
 import { supabase } from '../lib/supabase';
+import { usePageSubcontractor } from '../hooks/usePageSubcontractor';
+import PageSubcontractorSelector from '../components/PageSubcontractorSelector';
 import { Camera, MapPin, Image as ImageIcon, Plus, X, UploadCloud, Calendar as CalendarIcon, Pencil, Trash2, EyeOff, Eye, Edit2, ChevronLeft, ChevronRight, ArrowUpDown } from 'lucide-react';
 import PdfViewer from '../components/PdfViewer';
 import DatePickerWithWeek from '../components/DatePickerWithWeek';
@@ -133,7 +134,7 @@ const defaultPlansData: PlansData = {
 };
 
 export default function Progress() {
-    const { selectedSubcontractorId } = useSubcontractor();
+    const { selectedSubcontractorId, setSelectedSubcontractorId } = usePageSubcontractor();
     const [subcontractors, setSubcontractors] = useState<any[]>([]);
     const [photos, setPhotos] = useState<any[]>([]);
     const [areas, setAreas] = useState<ProjectArea[]>([]);
@@ -1008,16 +1009,19 @@ export default function Progress() {
                     <h1 className="text-2xl font-extrabold text-slate-900 tracking-tight">Fremdriftskontroll</h1>
                     <p className="text-slate-500 font-medium text-sm mt-1">Dokumenter fremdrift på byggeplass med bilder</p>
                 </div>
-                <button
-                    onClick={() => {
-                        setNewPhoto({ area: '', area_id: '', photo_url: '', notes: '', date: new Date().toISOString().split('T')[0] });
-                        setShowModal(true);
-                    }}
-                    className="bg-primary-600 text-white px-5 py-2.5 rounded-xl font-bold text-sm shadow-[0_4px_12px_rgba(37,99,235,0.25)] hover:bg-primary-700 hover:-translate-y-0.5 transition-all flex items-center shrink-0"
-                >
-                    <Plus className="w-4 h-4 mr-2" />
-                    Last opp bilde
-                </button>
+                <div className="flex items-center gap-3 flex-wrap">
+                    <PageSubcontractorSelector value={selectedSubcontractorId} onChange={setSelectedSubcontractorId} />
+                    <button
+                        onClick={() => {
+                            setNewPhoto({ area: '', area_id: '', photo_url: '', notes: '', date: new Date().toISOString().split('T')[0] });
+                            setShowModal(true);
+                        }}
+                        className="bg-primary-600 text-white px-5 py-2.5 rounded-xl font-bold text-sm shadow-[0_4px_12px_rgba(37,99,235,0.25)] hover:bg-primary-700 hover:-translate-y-0.5 transition-all flex items-center shrink-0"
+                    >
+                        <Plus className="w-4 h-4 mr-2" />
+                        Last opp bilde
+                    </button>
+                </div>
             </div>
 
             {/* Progress Plan Section */}

@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
-import { useSubcontractor } from '../contexts/SubcontractorContext';
 import { supabase } from '../lib/supabase';
 import { AlertTriangle, Plus, ShieldAlert, X } from 'lucide-react';
 import { cn } from '../lib/utils';
+import { usePageSubcontractor } from '../hooks/usePageSubcontractor';
+import PageSubcontractorSelector from '../components/PageSubcontractorSelector';
 
 export default function Risks() {
-    const { selectedSubcontractorId } = useSubcontractor();
+    const { selectedSubcontractorId, setSelectedSubcontractorId } = usePageSubcontractor();
     const [risks, setRisks] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
     const [showModal, setShowModal] = useState(false);
@@ -76,13 +77,16 @@ export default function Risks() {
                     <h1 className="text-2xl font-extrabold text-slate-900 tracking-tight">Risikostyring</h1>
                     <p className="text-slate-500 font-medium text-sm mt-1">Identifiser, evaluer og håndter prosjektrisiko</p>
                 </div>
-                <button
-                    onClick={() => setShowModal(true)}
-                    className="bg-primary-600 text-white px-5 py-2.5 rounded-xl font-bold text-sm shadow-[0_4px_12px_rgba(37,99,235,0.25)] hover:bg-primary-700 hover:-translate-y-0.5 transition-all flex items-center shrink-0"
-                >
-                    <Plus className="w-4 h-4 mr-2" />
-                    Registrer Risiko
-                </button>
+                <div className="flex items-center gap-3 flex-wrap">
+                    <PageSubcontractorSelector value={selectedSubcontractorId} onChange={setSelectedSubcontractorId} />
+                    <button
+                        onClick={() => setShowModal(true)}
+                        className="bg-primary-600 text-white px-5 py-2.5 rounded-xl font-bold text-sm shadow-[0_4px_12px_rgba(37,99,235,0.25)] hover:bg-primary-700 hover:-translate-y-0.5 transition-all flex items-center shrink-0"
+                    >
+                        <Plus className="w-4 h-4 mr-2" />
+                        Registrer Risiko
+                    </button>
+                </div>
             </div>
 
             <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">

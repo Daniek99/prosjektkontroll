@@ -1,5 +1,4 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
-import { useSubcontractor } from '../contexts/SubcontractorContext';
 import { supabase } from '../lib/supabase';
 import { AlertCircle, CalendarClock, Activity, AlertTriangle, ChevronDown, ChevronUp, Clock, Filter } from 'lucide-react';
 import TodoList from '../components/TodoList';
@@ -13,7 +12,6 @@ import DecisionLogWidget from '../components/DecisionLogWidget';
 
 
 export default function Dashboard() {
-    const {} = useSubcontractor();
     const [subcontractorsData, setSubcontractorsData] = useState<any[]>([]);
     const [progressAlerts, setProgressAlerts] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
@@ -340,7 +338,7 @@ export default function Dashboard() {
 
                     {/* Notes + Prosjektering — each a quarter of the page width */}
                     <div className="grid grid-cols-2 gap-4">
-                        <NotesWidget selectedSubcontractorId={selectedDashboardSubcontractorId} />
+                        <NotesWidget />
                         <DecisionLogWidget selectedSubcontractorId={selectedDashboardSubcontractorId} />
                     </div>
                 </div>
