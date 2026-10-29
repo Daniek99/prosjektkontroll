@@ -151,7 +151,7 @@ export default function DecisionLogWidget({ selectedSubcontractorId: propSelecte
         : { width: '170px' };
 
     return (
-        <div className="bg-white rounded-3xl border border-slate-200/60 p-4 shadow-sm flex flex-col">
+        <div className="bg-white rounded-3xl border border-slate-200/60 p-4 shadow-sm flex flex-col min-w-0">
             <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center min-w-0">
                     <div className="bg-primary-50 p-1.5 rounded-lg mr-2 shrink-0">
@@ -277,7 +277,7 @@ export default function DecisionLogWidget({ selectedSubcontractorId: propSelecte
                     ) : groups.length === 0 ? (
                         <p className="text-[10px] text-slate-400 text-center py-2">Ingen beslutninger ennå.</p>
                     ) : (
-                        <div className="flex gap-2 overflow-x-auto pb-1">
+                        <div className="flex gap-2 overflow-x-auto pb-1 w-full min-w-0">
                             {groups.map((group) => (
                                 <div
                                     key={group.id ?? 'none'}

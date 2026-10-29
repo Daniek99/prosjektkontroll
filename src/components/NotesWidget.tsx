@@ -237,7 +237,7 @@ export default function NotesWidget() {
     if (!canView) return null;
 
     return (
-        <div className="bg-white rounded-3xl border border-slate-200/60 p-4 shadow-sm flex flex-col">
+        <div className="bg-white rounded-3xl border border-slate-200/60 p-4 shadow-sm flex flex-col min-w-0">
             <div className="flex items-center justify-between mb-2 gap-2">
                 <div className="flex items-center shrink-0">
                     <div className="bg-primary-50 p-1.5 rounded-lg mr-2">
