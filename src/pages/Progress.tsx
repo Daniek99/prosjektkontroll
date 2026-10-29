@@ -2,7 +2,7 @@ import { useEffect, useState, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import { usePageSubcontractor } from '../hooks/usePageSubcontractor';
 import PageSubcontractorSelector from '../components/PageSubcontractorSelector';
-import { Camera, MapPin, Image as ImageIcon, Plus, X, UploadCloud, Calendar as CalendarIcon, Pencil, Trash2, EyeOff, Eye, Edit2, ChevronLeft, ChevronRight, ArrowUpDown } from 'lucide-react';
+import { Camera, MapPin, Image as ImageIcon, Plus, X, UploadCloud, Calendar as CalendarIcon, Pencil, Trash2, EyeOff, Eye, Edit2, ChevronLeft, ChevronRight, ArrowUpDown, Users } from 'lucide-react';
 import PdfViewer from '../components/PdfViewer';
 import DatePickerWithWeek from '../components/DatePickerWithWeek';
 
@@ -54,6 +54,8 @@ interface ProgressTask {
     deadline: string | null;
     expected_end_date: string | null;
     status: string;
+    risk_assessment?: boolean;
+    subcontractors?: { company_name: string } | null;
 }
 
 interface PlansData {
@@ -152,6 +154,8 @@ export default function Progress() {
     const [showHidden, setShowHidden] = useState(false);
     const [projectPlans, setProjectPlans] = useState<{ id: string, name: string, file_url: string }[]>([]);
     const [progressTasks, setProgressTasks] = useState<ProgressTask[]>([]);
+    const [activitySubIds, setActivitySubIds] = useState<string[]>([]);
+    const [showActivitySubDropdown, setShowActivitySubDropdown] = useState(false);
     const [sortBy, setSortBy] = useState<'start_date' | 'expected_end_date' | 'deadline'>('start_date');
     const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
     const [prioritizeActive, setPrioritizeActive] = useState<boolean>(false);
@@ -183,6 +187,11 @@ export default function Progress() {
         }
 
         tasks.sort((a, b) => {
+            // Group by subcontractor first so the register is always sorted by UE.
+            const an = a.subcontractors?.company_name || '';
+            const bn = b.subcontractors?.company_name || '';
+            if (an !== bn) return an.localeCompare(bn, 'no');
+
             if (prioritizeActive) {
                 const aActive = a.status === 'planned' || a.status === 'in_progress';
                 const bActive = b.status === 'planned' || b.status === 'in_progress';
@@ -316,14 +325,6 @@ export default function Progress() {
                 .eq('subcontractor_id', selectedSubcontractorId)
                 .maybeSingle();
 
-            const { data: tasksRes } = await supabase
-                .from('work_activities')
-                .select('*')
-                .eq('subcontractor_id', selectedSubcontractorId)
-                .order('start_date', { ascending: true });
-
-            if (tasksRes) setProgressTasks(tasksRes);
-
             if (photoData) setPhotos(photoData);
             if (areaData) setAreas(areaData);
             if (gridRes && gridRes.grid_data) {
@@ -400,6 +401,39 @@ export default function Progress() {
         }
         loadData();
     }, [selectedSubcontractorId]);
+
+    // Keep the activity register's subcontractor selection in sync with the page.
+    useEffect(() => {
+        if (selectedSubcontractorId) {
+            setActivitySubIds([selectedSubcontractorId]);
+        }
+    }, [selectedSubcontractorId]);
+
+    // Load activities for all selected subcontractors, sorted by subcontractor.
+    useEffect(() => {
+        if (activitySubIds.length === 0) {
+            setProgressTasks([]);
+            return;
+        }
+        let cancelled = false;
+        (async () => {
+            const { data } = await supabase
+                .from('work_activities')
+                .select('*, subcontractors(company_name)')
+                .in('subcontractor_id', activitySubIds)
+                .order('start_date', { ascending: true });
+            if (!cancelled && data) {
+                const sorted = [...(data as unknown as ProgressTask[])].sort((a, b) => {
+                    const an = a.subcontractors?.company_name || '';
+                    const bn = b.subcontractors?.company_name || '';
+                    if (an !== bn) return an.localeCompare(bn, 'no');
+                    return (a.start_date || '').localeCompare(b.start_date || '');
+                });
+                setProgressTasks(sorted);
+            }
+        })();
+        return () => { cancelled = true; };
+    }, [activitySubIds]);
 
     const savePlansData = async (newPlansData: PlansData, skipSupabase = false, isUndo = false) => {
         setPlansData(newPlansData);
@@ -558,7 +592,8 @@ export default function Progress() {
             start_date: currentTask.start_date || null,
             deadline: currentTask.deadline || null,
             expected_end_date: currentTask.expected_end_date || null,
-            status: currentTask.status || 'planned'
+            status: currentTask.status || 'planned',
+            risk_assessment: currentTask.risk_assessment ?? false
         };
 
         let res;
@@ -1322,10 +1357,45 @@ export default function Progress() {
                         </h2>
                         <p className="text-slate-500 text-sm mt-1.5 font-medium">Spor datoer for oppstart, forventet ferdig og frister.</p>
                     </div>
-                    <button onClick={() => { setCurrentTask({}); setShowTaskModal(true); }} className="bg-primary-600 text-white px-4 py-2.5 rounded-xl font-bold text-sm shadow flex items-center hover:bg-primary-700 transition">
-                        <Plus className="w-4 h-4 mr-2" />
-                        Ny Aktivitet
-                    </button>
+                    <div className="flex items-center gap-3 flex-wrap">
+                        <div className="relative">
+                            <button onClick={() => setShowActivitySubDropdown(!showActivitySubDropdown)} className="bg-slate-100 text-slate-700 px-4 py-2.5 rounded-xl font-bold text-sm hover:bg-slate-200 transition-colors flex items-center shrink-0">
+                                <Users className="w-4 h-4 mr-2" />
+                                Velg UE ({activitySubIds.length})
+                            </button>
+                            {showActivitySubDropdown && (
+                                <>
+                                    <div className="fixed inset-0 z-40" onClick={() => setShowActivitySubDropdown(false)} />
+                                    <div className="absolute right-0 mt-2 w-80 bg-white rounded-2xl shadow-xl border border-slate-200 z-50 max-h-96 overflow-hidden flex flex-col">
+                                        <div className="px-4 py-3 border-b border-slate-100 bg-slate-50 flex items-center justify-between">
+                                            <span className="text-xs font-bold text-slate-600 uppercase tracking-widest">Underentreprenører</span>
+                                            <div className="flex gap-2">
+                                                <button onClick={() => setActivitySubIds(subcontractors.map(s => s.id))} className="text-[10px] font-bold text-primary-600 hover:text-primary-700">Velg alle</button>
+                                                <button onClick={() => setActivitySubIds([])} className="text-[10px] font-bold text-red-500 hover:text-red-600">Fjern alle</button>
+                                            </div>
+                                        </div>
+                                        <div className="overflow-y-auto flex-1 p-2">
+                                            {subcontractors.map(s => (
+                                                <label key={s.id} className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-slate-50 cursor-pointer">
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={activitySubIds.includes(s.id)}
+                                                        onChange={() => setActivitySubIds(prev => prev.includes(s.id) ? prev.filter(id => id !== s.id) : [...prev, s.id])}
+                                                        className="w-3.5 h-3.5 text-primary-600 border-slate-300 rounded focus:ring-primary-500"
+                                                    />
+                                                    <span className="text-xs font-bold text-slate-700 truncate flex-1">{s.company_name}</span>
+                                                </label>
+                                            ))}
+                                        </div>
+                                    </div>
+                                </>
+                            )}
+                        </div>
+                        <button onClick={() => { setCurrentTask({}); setShowTaskModal(true); }} className="bg-primary-600 text-white px-4 py-2.5 rounded-xl font-bold text-sm shadow flex items-center hover:bg-primary-700 transition">
+                            <Plus className="w-4 h-4 mr-2" />
+                            Ny Aktivitet
+                        </button>
+                    </div>
                 </div>
                 {progressTasks.length === 0 ? (
                     <div className="text-center py-8 bg-slate-50 rounded-2xl border border-dashed border-slate-300">
@@ -1399,6 +1469,7 @@ export default function Progress() {
                                     <thead className="bg-slate-50/80 text-slate-500 uppercase tracking-wider font-extrabold text-xs border-b border-slate-200">
                                         <tr>
                                             <th className="p-4">Aktivitet / Beskrivelse</th>
+                                            <th className="p-4">Underentreprenør</th>
                                             <th className="p-4">Oppstart</th>
                                             <th className="p-4 text-primary-700 bg-primary-50/50">Forventet ferdig</th>
                                             <th className="p-4 text-red-600 bg-red-50/50">Frist (Deadline)</th>
@@ -1409,7 +1480,17 @@ export default function Progress() {
                                     <tbody className="divide-y divide-slate-100">
                                         {processedTasks.map(task => (
                                             <tr key={task.id} className="hover:bg-slate-50 transition-colors">
-                                                <td className="p-4 font-bold text-slate-800 border-r border-slate-100">{task.name}</td>
+                                                <td className="p-4 font-bold text-slate-800 border-r border-slate-100">
+                                                    <div className="flex items-center gap-2">
+                                                        <span>{task.name}</span>
+                                                        {task.risk_assessment && (
+                                                            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-extrabold uppercase tracking-widest bg-amber-100 text-amber-700 border border-amber-200 shrink-0">
+                                                                Risikofylt
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                </td>
+                                                <td className="p-4 font-semibold text-slate-600 border-r border-slate-100">{task.subcontractors?.company_name || '-'}</td>
                                                 <td className="p-2 border-r border-slate-100 relative group/date cursor-pointer">
                                                     <div className="absolute inset-0 flex items-center justify-center pointer-events-none opacity-0 group-hover/date:opacity-100 transition-opacity bg-slate-50/50">
                                                         <Edit2 className="w-4 h-4 text-slate-400" />
@@ -1969,6 +2050,16 @@ export default function Progress() {
                                     <option value="completed">Ferdig</option>
                                 </select>
                             </div>
+                            <label className="flex items-center gap-2 px-1 py-2 cursor-pointer">
+                                <input
+                                    type="checkbox"
+                                    checked={currentTask.risk_assessment ?? false}
+                                    onChange={e => setCurrentTask({ ...currentTask, risk_assessment: e.target.checked })}
+                                    className="w-4 h-4 rounded border-slate-300 text-primary-600 focus:ring-primary-500"
+                                />
+                                <span className="text-sm font-bold text-slate-700">Risikofylt aktivitet</span>
+                                <span className="text-xs text-slate-400">(vises i Risikostyring)</span>
+                            </label>
                             <div className="pt-2 flex gap-3">
                                 <button type="button" onClick={() => setShowTaskModal(false)} className="flex-1 px-4 py-3 bg-white border border-slate-200 text-slate-700 font-bold rounded-xl hover:bg-slate-50 transition-colors">Avbryt</button>
                                 <button type="submit" disabled={loading} className="flex-1 px-4 py-3 bg-primary-600 text-white font-bold rounded-xl hover:bg-primary-700 disabled:opacity-50 transition-colors shadow-sm">Lagre</button>
