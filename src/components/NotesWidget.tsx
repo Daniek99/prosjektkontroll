@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { BookOpen, Plus, ExternalLink, Cloud, Sun, CloudRain, Snowflake, Calendar } from 'lucide-react';
 import { supabase } from '../lib/supabase';
@@ -21,6 +21,30 @@ const weatherIcons: Record<string, typeof Cloud> = {
     Snø: Snowflake,
 };
 
+// 0 means "all time".
+const PERIOD_OPTIONS = [
+    { value: 7, label: 'Siste uke' },
+    { value: 30, label: 'Siste måned' },
+    { value: 90, label: 'Siste 3 mnd' },
+    { value: 180, label: 'Siste 6 mnd' },
+    { value: 365, label: 'Siste år' },
+    { value: 0, label: 'Alt' },
+];
+
+const DEFAULT_PERIOD_DAYS = 30;
+
+function getISOWeek(date: Date): number {
+    const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+    const dayNum = d.getUTCDay() || 7;
+    d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+    const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+    return Math.ceil((((d.getTime() - yearStart.getTime()) / 86400000) + 1) / 7);
+}
+
+function capitalize(value: string): string {
+    return value.charAt(0).toUpperCase() + value.slice(1);
+}
+
 export default function NotesWidget({ selectedSubcontractorId: propSelectedSubcontractorId }: { selectedSubcontractorId?: string | null }) {
     const { selectedSubcontractorId: contextSelectedSubcontractorId, subcontractors } = useSubcontractor();
     const { canAccess } = useProject();
@@ -32,6 +56,7 @@ export default function NotesWidget({ selectedSubcontractorId: propSelectedSubco
     const [draft, setDraft] = useState('');
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState('');
+    const [periodDays, setPeriodDays] = useState(DEFAULT_PERIOD_DAYS);
 
     const canView = canAccess('diary');
 
@@ -41,14 +66,26 @@ export default function NotesWidget({ selectedSubcontractorId: propSelectedSubco
             return;
         }
         setLoading(true);
+
+        let fromDate: string | null = null;
+        if (periodDays > 0) {
+            const from = new Date();
+            from.setDate(from.getDate() - periodDays);
+            fromDate = from.toISOString().split('T')[0];
+        }
+
         let query = supabase
             .from('diary_entries')
             .select('id, date, content, weather, created_at, subcontractor_id')
             .order('date', { ascending: false })
-            .limit(5);
+            .limit(500);
         if (selectedSubcontractorId) {
             query = query.eq('subcontractor_id', selectedSubcontractorId);
         }
+        if (fromDate) {
+            query = query.gte('date', fromDate);
+        }
+
         const { data, error: err } = await query;
         if (err) {
             console.error('Error loading notes', err);
@@ -57,7 +94,7 @@ export default function NotesWidget({ selectedSubcontractorId: propSelectedSubco
             setNotes((data ?? []) as NoteEntry[]);
         }
         setLoading(false);
-    }, [canView, selectedSubcontractorId]);
+    }, [canView, selectedSubcontractorId, periodDays]);
 
     useEffect(() => {
         loadNotes();
@@ -84,6 +121,44 @@ export default function NotesWidget({ selectedSubcontractorId: propSelectedSubco
         await loadNotes();
     };
 
+    // Group notes by month, then by ISO week. Notes arrive sorted newest first,
+    // so the Map insertion order keeps the newest month/week on top.
+    const groupedNotes = useMemo(() => {
+        const months = new Map<string, {
+            label: string;
+            weeks: Map<string, { label: string; notes: NoteEntry[] }>;
+        }>();
+
+        notes.forEach((note) => {
+            const date = new Date(`${note.date}T00:00:00`);
+            if (Number.isNaN(date.getTime())) return;
+
+            const monthKey = `${date.getFullYear()}-${date.getMonth()}`;
+            const monthLabel = capitalize(date.toLocaleDateString('no-NO', { month: 'long', year: 'numeric' }));
+            const week = getISOWeek(date);
+            const weekKey = `${date.getFullYear()}-W${week}`;
+
+            if (!months.has(monthKey)) {
+                months.set(monthKey, { label: monthLabel, weeks: new Map() });
+            }
+            const month = months.get(monthKey)!;
+            if (!month.weeks.has(weekKey)) {
+                month.weeks.set(weekKey, { label: `Uke ${week}`, notes: [] });
+            }
+            month.weeks.get(weekKey)!.notes.push(note);
+        });
+
+        return Array.from(months.entries()).map(([key, month]) => ({
+            key,
+            label: month.label,
+            weeks: Array.from(month.weeks.entries()).map(([weekKey, week]) => ({
+                key: weekKey,
+                label: week.label,
+                notes: week.notes,
+            })),
+        }));
+    }, [notes]);
+
     if (!canView) return null;
 
     const subName = (id: string | null) =>
@@ -91,19 +166,31 @@ export default function NotesWidget({ selectedSubcontractorId: propSelectedSubco
 
     return (
         <div className="bg-white rounded-3xl border border-slate-200/60 p-4 shadow-sm flex flex-col">
-            <div className="flex items-center justify-between mb-2">
-                <div className="flex items-center">
+            <div className="flex items-center justify-between mb-2 gap-2">
+                <div className="flex items-center shrink-0">
                     <div className="bg-primary-50 p-1.5 rounded-lg mr-2">
                         <BookOpen className="w-3.5 h-3.5 text-primary-600" />
                     </div>
                     <h3 className="text-xs font-extrabold text-slate-800">Notater</h3>
                 </div>
-                <button
-                    onClick={() => navigate('/diary')}
-                    className="flex items-center gap-1 text-[10px] font-bold text-primary-600 hover:text-primary-700 px-1.5 py-1 rounded hover:bg-primary-50 transition-colors"
-                >
-                    Se alle <ExternalLink className="w-3 h-3" />
-                </button>
+                <div className="flex items-center gap-1 min-w-0">
+                    <select
+                        value={periodDays}
+                        onChange={(e) => setPeriodDays(Number(e.target.value))}
+                        aria-label="Visningsperiode for notater"
+                        className="bg-slate-50 border border-slate-200 rounded-lg px-1.5 py-1 text-[10px] font-bold text-slate-600 focus:outline-none focus:ring-1 focus:ring-primary-500/50 cursor-pointer"
+                    >
+                        {PERIOD_OPTIONS.map((option) => (
+                            <option key={option.value} value={option.value}>{option.label}</option>
+                        ))}
+                    </select>
+                    <button
+                        onClick={() => navigate('/diary')}
+                        className="flex items-center gap-1 text-[10px] font-bold text-primary-600 hover:text-primary-700 px-1.5 py-1 rounded hover:bg-primary-50 transition-colors shrink-0"
+                    >
+                        Se alle <ExternalLink className="w-3 h-3" />
+                    </button>
+                </div>
             </div>
 
             {selectedSubcontractorId ? (
@@ -137,34 +224,55 @@ export default function NotesWidget({ selectedSubcontractorId: propSelectedSubco
                 <div className="flex justify-center py-3">
                     <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-primary-600"></div>
                 </div>
-            ) : notes.length === 0 ? (
-                <p className="text-[10px] text-slate-400 text-center py-2">Ingen notater ennå.</p>
+            ) : groupedNotes.length === 0 ? (
+                <p className="text-[10px] text-slate-400 text-center py-2">Ingen notater i valgt periode.</p>
             ) : (
-                <div className="space-y-1.5 max-h-48 overflow-y-auto">
-                    {notes.map((note) => {
-                        const Icon = weatherIcons[note.weather] ?? Cloud;
-                        return (
-                            <button
-                                key={note.id}
-                                onClick={() => navigate('/diary')}
-                                className="w-full text-left bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg px-2 py-1.5 transition-colors"
-                            >
-                                <div className="flex items-center justify-between gap-2 mb-0.5">
-                                    <span className="flex items-center gap-1 text-[9px] font-bold text-slate-500 uppercase tracking-wide">
-                                        <Calendar className="w-2.5 h-2.5" />
-                                        {new Date(note.date).toLocaleDateString('no-NO', { day: 'numeric', month: 'short' })}
-                                    </span>
-                                    <span className="flex items-center gap-1 text-[9px] font-bold text-slate-400 min-w-0">
-                                        <Icon className="w-2.5 h-2.5 shrink-0" />
-                                        {!selectedSubcontractorId && (
-                                            <span className="truncate max-w-[90px]">{subName(note.subcontractor_id)}</span>
-                                        )}
-                                    </span>
+                <div className="max-h-96 overflow-y-auto pr-0.5">
+                    {groupedNotes.map((month) => (
+                        <div key={month.key} className="mb-2 last:mb-0">
+                            <div className="sticky top-0 z-10 bg-white/95 backdrop-blur-sm px-1 py-1">
+                                <h4 className="text-[10px] font-extrabold text-slate-700 uppercase tracking-widest">
+                                    {month.label}
+                                </h4>
+                            </div>
+                            {month.weeks.map((week) => (
+                                <div key={week.key} className="mb-1.5 last:mb-0">
+                                    <div className="flex items-center gap-1.5 px-1 mb-1">
+                                        <span className="text-[9px] font-bold text-primary-600 uppercase tracking-wider">
+                                            {week.label}
+                                        </span>
+                                        <span className="flex-1 h-px bg-slate-100" />
+                                    </div>
+                                    <div className="space-y-1.5">
+                                        {week.notes.map((note) => {
+                                            const Icon = weatherIcons[note.weather] ?? Cloud;
+                                            return (
+                                                <button
+                                                    key={note.id}
+                                                    onClick={() => navigate('/diary')}
+                                                    className="w-full text-left bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg px-2 py-1.5 transition-colors"
+                                                >
+                                                    <div className="flex items-center justify-between gap-2 mb-0.5">
+                                                        <span className="flex items-center gap-1 text-[9px] font-bold text-slate-500 uppercase tracking-wide">
+                                                            <Calendar className="w-2.5 h-2.5" />
+                                                            {new Date(`${note.date}T00:00:00`).toLocaleDateString('no-NO', { weekday: 'short', day: 'numeric', month: 'short' })}
+                                                        </span>
+                                                        <span className="flex items-center gap-1 text-[9px] font-bold text-slate-400 min-w-0">
+                                                            <Icon className="w-2.5 h-2.5 shrink-0" />
+                                                            {!selectedSubcontractorId && (
+                                                                <span className="truncate max-w-[90px]">{subName(note.subcontractor_id)}</span>
+                                                            )}
+                                                        </span>
+                                                    </div>
+                                                    <p className="text-[10px] font-medium text-slate-700 line-clamp-2 whitespace-pre-wrap">{note.content}</p>
+                                                </button>
+                                            );
+                                        })}
+                                    </div>
                                 </div>
-                                <p className="text-[10px] font-medium text-slate-700 line-clamp-2 whitespace-pre-wrap">{note.content}</p>
-                            </button>
-                        );
-                    })}
+                            ))}
+                        </div>
+                    ))}
                 </div>
             )}
         </div>
