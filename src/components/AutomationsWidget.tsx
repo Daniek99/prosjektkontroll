@@ -4,8 +4,6 @@ import {
     Printer,
     Mail,
     FileText,
-    Bell,
-    Receipt,
     Workflow,
     Plus,
     Clock,
@@ -93,22 +91,6 @@ const AUTOMATIONS: AutomationDef[] = [
         icon: FileText,
         comingSoon: true,
     },
-    {
-        id: 'contract-expiry',
-        name: 'Kontraktsvarsling',
-        description:
-            'Varsler når underentreprenørkontrakter nærmer seg utløpsdato.',
-        icon: Bell,
-        comingSoon: true,
-    },
-    {
-        id: 'invoice-export',
-        name: 'Fakturaeksport',
-        description:
-            'Eksporterer godkjente endringsmeldinger til regnskapssystemet.',
-        icon: Receipt,
-        comingSoon: true,
-    },
 ];
 
 const LOCAL_KEY = 'gc_automations_state';
@@ -142,6 +124,7 @@ function formatElapsed(from: string | null | undefined): string {
 }
 
 export default function AutomationsWidget() {
+    const [showAll, setShowAll] = useState(false);
     const [enabled, setEnabled] = useState<Record<string, boolean>>(loadLocalEnabled);
     const [dbRows, setDbRows] = useState<AutomationState[]>(() => readCachedAutomations() ?? []);
     const [saving, setSaving] = useState<string | null>(null);
@@ -261,6 +244,7 @@ export default function AutomationsWidget() {
         });
     }, [dbRows]);
 
+    const visibleAutomations = showAll ? AUTOMATIONS : AUTOMATIONS.slice(0, 3);
     const readyCount = useMemo(() => AUTOMATIONS.filter((a) => !a.comingSoon).length, []);
     const activeCount = useMemo(
         () => AUTOMATIONS.filter((a) => !a.comingSoon && enabled[a.id]).length,
@@ -339,7 +323,7 @@ export default function AutomationsWidget() {
 
             {/* List */}
             <div className="space-y-2">
-                {AUTOMATIONS.map((a) => {
+                {visibleAutomations.map((a) => {
                     const isActive = !a.comingSoon && enabled[a.id];
                     const Icon = a.icon;
                     const row = rowFor(a.id);
@@ -514,6 +498,16 @@ export default function AutomationsWidget() {
                     );
                 })}
             </div>
+
+            {AUTOMATIONS.length > 3 && (
+                <button
+                    type="button"
+                    onClick={() => setShowAll((prev) => !prev)}
+                    className="w-full mt-3 py-2 text-xs font-bold text-primary-600 hover:text-primary-700 hover:bg-primary-50 rounded-xl transition-colors flex items-center justify-center gap-1.5"
+                >
+                    {showAll ? 'Vis mindre' : `Vis mer (${AUTOMATIONS.length - 3})`}
+                </button>
+            )}
 
             {/* Add new (placeholder) */}
             <button
