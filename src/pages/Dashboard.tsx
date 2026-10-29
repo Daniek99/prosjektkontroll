@@ -9,6 +9,7 @@ import ActivityRegisterWidget from '../components/ActivityRegisterWidget';
 import OutlookMailWidget from '../components/OutlookMailWidget';
 import AutomationsWidget from '../components/AutomationsWidget';
 import NotesWidget from '../components/NotesWidget';
+import DecisionLogWidget from '../components/DecisionLogWidget';
 
 
 export default function Dashboard() {
@@ -337,8 +338,11 @@ export default function Dashboard() {
                         </div>
                     </div>
 
-                    {/* Notes widget — sits directly below Bemanning + Activities */}
-                    <NotesWidget selectedSubcontractorId={selectedDashboardSubcontractorId} />
+                    {/* Notes + Prosjektering — each a quarter of the page width */}
+                    <div className="grid grid-cols-2 gap-4">
+                        <NotesWidget selectedSubcontractorId={selectedDashboardSubcontractorId} />
+                        <DecisionLogWidget selectedSubcontractorId={selectedDashboardSubcontractorId} />
+                    </div>
                 </div>
 
                 {/* Right column: Calendar + Automations */}

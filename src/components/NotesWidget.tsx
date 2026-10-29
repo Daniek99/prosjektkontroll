@@ -4,6 +4,7 @@ import { BookOpen, Plus, ExternalLink, Cloud, Sun, CloudRain, Snowflake, Calenda
 import { supabase } from '../lib/supabase';
 import { useSubcontractor } from '../contexts/SubcontractorContext';
 import { useProject } from '../contexts/ProjectContext';
+import { groupNotesByMonthWeek, parseNoteDate } from '../lib/noteGrouping';
 
 type NoteEntry = {
     id: string;
@@ -32,18 +33,6 @@ const PERIOD_OPTIONS = [
 ];
 
 const DEFAULT_PERIOD_DAYS = 30;
-
-function getISOWeek(date: Date): number {
-    const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
-    const dayNum = d.getUTCDay() || 7;
-    d.setUTCDate(d.getUTCDate() + 4 - dayNum);
-    const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
-    return Math.ceil((((d.getTime() - yearStart.getTime()) / 86400000) + 1) / 7);
-}
-
-function capitalize(value: string): string {
-    return value.charAt(0).toUpperCase() + value.slice(1);
-}
 
 export default function NotesWidget({ selectedSubcontractorId: propSelectedSubcontractorId }: { selectedSubcontractorId?: string | null }) {
     const { selectedSubcontractorId: contextSelectedSubcontractorId, subcontractors } = useSubcontractor();
@@ -123,41 +112,7 @@ export default function NotesWidget({ selectedSubcontractorId: propSelectedSubco
 
     // Group notes by month, then by ISO week. Notes arrive sorted newest first,
     // so the Map insertion order keeps the newest month/week on top.
-    const groupedNotes = useMemo(() => {
-        const months = new Map<string, {
-            label: string;
-            weeks: Map<string, { label: string; notes: NoteEntry[] }>;
-        }>();
-
-        notes.forEach((note) => {
-            const date = new Date(`${note.date}T00:00:00`);
-            if (Number.isNaN(date.getTime())) return;
-
-            const monthKey = `${date.getFullYear()}-${date.getMonth()}`;
-            const monthLabel = capitalize(date.toLocaleDateString('no-NO', { month: 'long', year: 'numeric' }));
-            const week = getISOWeek(date);
-            const weekKey = `${date.getFullYear()}-W${week}`;
-
-            if (!months.has(monthKey)) {
-                months.set(monthKey, { label: monthLabel, weeks: new Map() });
-            }
-            const month = months.get(monthKey)!;
-            if (!month.weeks.has(weekKey)) {
-                month.weeks.set(weekKey, { label: `Uke ${week}`, notes: [] });
-            }
-            month.weeks.get(weekKey)!.notes.push(note);
-        });
-
-        return Array.from(months.entries()).map(([key, month]) => ({
-            key,
-            label: month.label,
-            weeks: Array.from(month.weeks.entries()).map(([weekKey, week]) => ({
-                key: weekKey,
-                label: week.label,
-                notes: week.notes,
-            })),
-        }));
-    }, [notes]);
+    const groupedNotes = useMemo(() => groupNotesByMonthWeek(notes), [notes]);
 
     if (!canView) return null;
 
@@ -255,7 +210,7 @@ export default function NotesWidget({ selectedSubcontractorId: propSelectedSubco
                                                     <div className="flex items-center justify-between gap-2 mb-0.5">
                                                         <span className="flex items-center gap-1 text-[9px] font-bold text-slate-500 uppercase tracking-wide">
                                                             <Calendar className="w-2.5 h-2.5" />
-                                                            {new Date(`${note.date}T00:00:00`).toLocaleDateString('no-NO', { weekday: 'short', day: 'numeric', month: 'short' })}
+                                                            {parseNoteDate(note.date).toLocaleDateString('no-NO', { weekday: 'short', day: 'numeric', month: 'short' })}
                                                         </span>
                                                         <span className="flex items-center gap-1 text-[9px] font-bold text-slate-400 min-w-0">
                                                             <Icon className="w-2.5 h-2.5 shrink-0" />
