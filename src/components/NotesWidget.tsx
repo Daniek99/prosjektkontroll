@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { BookOpen, Plus, ExternalLink, Cloud, Sun, CloudRain, Snowflake, Calendar } from 'lucide-react';
+import { BookOpen, Plus, ExternalLink, Cloud, Sun, CloudRain, Snowflake, Calendar, Folder } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useSubcontractor } from '../contexts/SubcontractorContext';
 import { useProject } from '../contexts/ProjectContext';
+import { useAuth } from '../contexts/AuthContext';
 import { groupNotesByMonthWeek, parseNoteDate } from '../lib/noteGrouping';
 
 type NoteEntry = {
@@ -13,6 +14,19 @@ type NoteEntry = {
     weather: string;
     created_at: string;
     subcontractor_id: string | null;
+};
+
+type NoteFolder = {
+    id: string;
+    name: string;
+    sort_order: number;
+};
+
+type NoteSection = {
+    id: string;
+    folder_id: string;
+    name: string;
+    sort_order: number;
 };
 
 const weatherIcons: Record<string, typeof Cloud> = {
@@ -36,11 +50,16 @@ const DEFAULT_PERIOD_DAYS = 30;
 
 export default function NotesWidget({ selectedSubcontractorId: propSelectedSubcontractorId }: { selectedSubcontractorId?: string | null }) {
     const { selectedSubcontractorId: contextSelectedSubcontractorId, subcontractors } = useSubcontractor();
-    const { canAccess } = useProject();
+    const { canAccess, selectedProjectId, selectedProject } = useProject();
+    const { user } = useAuth();
     const navigate = useNavigate();
     const selectedSubcontractorId = propSelectedSubcontractorId ?? contextSelectedSubcontractorId;
 
     const [notes, setNotes] = useState<NoteEntry[]>([]);
+    const [folders, setFolders] = useState<NoteFolder[]>([]);
+    const [sections, setSections] = useState<NoteSection[]>([]);
+    const [placements, setPlacements] = useState<Record<string, string>>({});
+    const [selectedSectionId, setSelectedSectionId] = useState<string | null>(null);
     const [loading, setLoading] = useState(true);
     const [draft, setDraft] = useState('');
     const [saving, setSaving] = useState(false);
@@ -48,6 +67,59 @@ export default function NotesWidget({ selectedSubcontractorId: propSelectedSubco
     const [periodDays, setPeriodDays] = useState(DEFAULT_PERIOD_DAYS);
 
     const canView = canAccess('diary');
+
+    const loadOrganization = useCallback(async () => {
+        if (!canView || !user || !selectedProjectId) return;
+
+        let { data: folderData } = await supabase
+            .from('note_folders')
+            .select('id, name, sort_order')
+            .order('sort_order', { ascending: true })
+            .order('created_at', { ascending: true });
+
+        // First run for this user/project: create a folder named after the project.
+        if (!folderData || folderData.length === 0) {
+            const { data: createdFolders } = await supabase
+                .from('note_folders')
+                .insert([{
+                    user_id: user.id,
+                    project_id: selectedProjectId,
+                    name: selectedProject?.name || 'Notater',
+                    sort_order: 0,
+                }])
+                .select('id, name, sort_order');
+
+            if (createdFolders && createdFolders[0]) {
+                await supabase.from('note_sections').insert([{
+                    folder_id: createdFolders[0].id,
+                    user_id: user.id,
+                    project_id: selectedProjectId,
+                    name: 'Notater',
+                    sort_order: 0,
+                }]);
+                folderData = createdFolders;
+            }
+        }
+
+        const { data: sectionData } = await supabase
+            .from('note_sections')
+            .select('id, folder_id, name, sort_order')
+            .order('sort_order', { ascending: true })
+            .order('created_at', { ascending: true });
+
+        const { data: placementData } = await supabase
+            .from('note_placements')
+            .select('note_id, section_id');
+
+        const placementMap: Record<string, string> = {};
+        (placementData ?? []).forEach((row: { note_id: string; section_id: string }) => {
+            placementMap[row.note_id] = row.section_id;
+        });
+
+        setFolders((folderData ?? []) as NoteFolder[]);
+        setSections((sectionData ?? []) as NoteSection[]);
+        setPlacements(placementMap);
+    }, [canView, user, selectedProjectId, selectedProject?.name]);
 
     const loadNotes = useCallback(async () => {
         if (!canView) {
@@ -86,8 +158,44 @@ export default function NotesWidget({ selectedSubcontractorId: propSelectedSubco
     }, [canView, selectedSubcontractorId, periodDays]);
 
     useEffect(() => {
+        loadOrganization();
+    }, [loadOrganization]);
+
+    useEffect(() => {
         loadNotes();
     }, [loadNotes]);
+
+    // Keep a valid section selected.
+    useEffect(() => {
+        if (sections.length === 0) {
+            setSelectedSectionId(null);
+            return;
+        }
+        if (!selectedSectionId || !sections.some((s) => s.id === selectedSectionId)) {
+            setSelectedSectionId(sections[0].id);
+        }
+    }, [sections, selectedSectionId]);
+
+    const defaultSectionId = useMemo(() => {
+        const firstFolder = folders[0];
+        if (!firstFolder) return null;
+        return sections.find((s) => s.folder_id === firstFolder.id)?.id ?? null;
+    }, [folders, sections]);
+
+    const placeNote = async (noteId: string, sectionId: string | null) => {
+        if (!user || !selectedProjectId || !sectionId) return;
+        const { error: err } = await supabase
+            .from('note_placements')
+            .upsert([{
+                user_id: user.id,
+                note_id: noteId,
+                section_id: sectionId,
+                project_id: selectedProjectId,
+            }], { onConflict: 'user_id,note_id' });
+        if (!err) {
+            setPlacements((prev) => ({ ...prev, [noteId]: sectionId }));
+        }
+    };
 
     const handleAdd = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -95,24 +203,42 @@ export default function NotesWidget({ selectedSubcontractorId: propSelectedSubco
         setSaving(true);
         setError('');
         const today = new Date().toISOString().split('T')[0];
-        const { error: err } = await supabase.from('diary_entries').insert([{
-            subcontractor_id: selectedSubcontractorId,
-            date: today,
-            content: draft.trim(),
-            weather: 'Overskyet',
-        }]);
+        const { data, error: err } = await supabase
+            .from('diary_entries')
+            .insert([{
+                subcontractor_id: selectedSubcontractorId,
+                date: today,
+                content: draft.trim(),
+                weather: 'Overskyet',
+            }])
+            .select('id');
         setSaving(false);
         if (err) {
             setError(err.message);
             return;
         }
+        if (data?.[0] && selectedSectionId) {
+            await placeNote(data[0].id, selectedSectionId);
+        }
         setDraft('');
         await loadNotes();
     };
 
+    // Only show notes that belong to the selected folder/section. The default
+    // section also shows notes that have not been placed yet.
+    const sectionNotes = useMemo(() => {
+        return notes.filter((note) => {
+            const placed = placements[note.id];
+            if (selectedSectionId === defaultSectionId) {
+                return !placed || placed === selectedSectionId;
+            }
+            return placed === selectedSectionId;
+        });
+    }, [notes, placements, selectedSectionId, defaultSectionId]);
+
     // Group notes by month, then by ISO week. Notes arrive sorted newest first,
     // so the Map insertion order keeps the newest month/week on top.
-    const groupedNotes = useMemo(() => groupNotesByMonthWeek(notes), [notes]);
+    const groupedNotes = useMemo(() => groupNotesByMonthWeek(sectionNotes), [sectionNotes]);
 
     if (!canView) return null;
 
@@ -148,6 +274,29 @@ export default function NotesWidget({ selectedSubcontractorId: propSelectedSubco
                 </div>
             </div>
 
+            {/* Folder / section selector */}
+            <div className="flex items-center gap-1.5 mb-2">
+                <Folder className="w-3 h-3 text-slate-400 shrink-0" />
+                <select
+                    value={selectedSectionId ?? ''}
+                    onChange={(e) => setSelectedSectionId(e.target.value || null)}
+                    aria-label="Velg mappe og seksjon"
+                    className="flex-1 min-w-0 bg-slate-50 border border-slate-200 rounded-lg px-1.5 py-1 text-[10px] font-bold text-slate-600 focus:outline-none focus:ring-1 focus:ring-primary-500/50 cursor-pointer"
+                >
+                    {folders.map((folder) => {
+                        const folderSections = sections.filter((s) => s.folder_id === folder.id);
+                        if (folderSections.length === 0) return null;
+                        return (
+                            <optgroup key={folder.id} label={folder.name}>
+                                {folderSections.map((section) => (
+                                    <option key={section.id} value={section.id}>{section.name}</option>
+                                ))}
+                            </optgroup>
+                        );
+                    })}
+                </select>
+            </div>
+
             {selectedSubcontractorId ? (
                 <form onSubmit={handleAdd} className="mb-2">
                     <div className="flex gap-1.5">
@@ -180,7 +329,7 @@ export default function NotesWidget({ selectedSubcontractorId: propSelectedSubco
                     <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-primary-600"></div>
                 </div>
             ) : groupedNotes.length === 0 ? (
-                <p className="text-[10px] text-slate-400 text-center py-2">Ingen notater i valgt periode.</p>
+                <p className="text-[10px] text-slate-400 text-center py-2">Ingen notater i valgt mappe og periode.</p>
             ) : (
                 <div className="max-h-96 overflow-y-auto pr-0.5">
                     {groupedNotes.map((month) => (
