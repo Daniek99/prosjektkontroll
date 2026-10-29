@@ -15,6 +15,7 @@ export default function Bemanning() {
     const [newActivityName, setNewActivityName] = useState('');
     const [newActivityDesc, setNewActivityDesc] = useState('');
     const [newActivityChangeOrder, setNewActivityChangeOrder] = useState('');
+    const [newActivityRiskAssessment, setNewActivityRiskAssessment] = useState(false);
     const [editingActivityId, setEditingActivityId] = useState<string | null>(null);
     const [editActivityName, setEditActivityName] = useState('');
     const [editActivityDesc, setEditActivityDesc] = useState('');
@@ -380,7 +381,8 @@ export default function Bemanning() {
                 change_order_number: newActivityChangeOrder.trim() || null,
                 subcontractor_id: selectedSubcontractorId,
                 is_active: true,
-                status: 'planned'
+                status: 'planned',
+                risk_assessment: newActivityRiskAssessment
             }])
             .select();
         
@@ -389,6 +391,7 @@ export default function Bemanning() {
             setNewActivityName('');
             setNewActivityDesc('');
             setNewActivityChangeOrder('');
+            setNewActivityRiskAssessment(false);
             setShowQuickAddActivity(false);
             // Auto-select the new activity
             setNewManpower({ ...newManpower, billable_activities: [...newManpower.billable_activities, { activity_id: data[0].id, hours: '' }] });
@@ -1293,6 +1296,16 @@ export default function Bemanning() {
                                     className="w-full bg-slate-50 border border-blue-200 rounded-xl px-4 py-2.5 font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 transition-all"
                                     placeholder="Endringsmelding nummer (f.eks. EM-001)"
                                 />
+                                <label className="flex items-center gap-2 px-1 cursor-pointer">
+                                    <input
+                                        type="checkbox"
+                                        checked={newActivityRiskAssessment}
+                                        onChange={(e) => setNewActivityRiskAssessment(e.target.checked)}
+                                        className="w-4 h-4 rounded border-slate-300 text-primary-600 focus:ring-primary-500"
+                                    />
+                                    <span className="text-sm font-bold text-slate-700">Risikovurdering</span>
+                                    <span className="text-xs text-slate-400">(vises i Risikostyring)</span>
+                                </label>
                                 <button
                                     onClick={handleAddActivity}
                                     disabled={!newActivityName.trim()}

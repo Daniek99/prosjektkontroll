@@ -1,53 +1,105 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
-import { AlertTriangle, Plus, ShieldAlert, X } from 'lucide-react';
-import { cn } from '../lib/utils';
+import { AlertTriangle, ShieldAlert, Save, CheckCircle2, Clock } from 'lucide-react';
 import { usePageSubcontractor } from '../hooks/usePageSubcontractor';
 import PageSubcontractorSelector from '../components/PageSubcontractorSelector';
 
+interface RiskActivity {
+    id: string;
+    name: string;
+    description: string | null;
+    subcontractor_id: string | null;
+    risk_assessment: boolean;
+    risk_dangers: string | null;
+    risk_solutions: string | null;
+    risk_initiation_time: string | null;
+    subcontractors?: { company_name: string } | null;
+}
+
+type RiskForm = {
+    dangers: string;
+    solutions: string;
+    initiationTime: string;
+};
+
 export default function Risks() {
     const { selectedSubcontractorId, setSelectedSubcontractorId } = usePageSubcontractor();
-    const [risks, setRisks] = useState<any[]>([]);
+    const [activities, setActivities] = useState<RiskActivity[]>([]);
+    const [forms, setForms] = useState<Record<string, RiskForm>>({});
     const [loading, setLoading] = useState(true);
-    const [showModal, setShowModal] = useState(false);
-    const [newRisk, setNewRisk] = useState({ description: '', probability: 'Medium', impact: 'Medium', status: 'open' });
+    const [savingId, setSavingId] = useState<string | null>(null);
+    const [savedId, setSavedId] = useState<string | null>(null);
 
     useEffect(() => {
-        if (!selectedSubcontractorId) return;
+        if (!selectedSubcontractorId) {
+            setActivities([]);
+            setLoading(false);
+            return;
+        }
 
-        async function loadRisks() {
+        async function loadActivities() {
+            setLoading(true);
             const { data } = await supabase
-                .from('risks')
-                .select('*')
+                .from('work_activities')
+                .select('id, name, description, subcontractor_id, risk_assessment, risk_dangers, risk_solutions, risk_initiation_time, subcontractors(company_name)')
                 .eq('subcontractor_id', selectedSubcontractorId)
-                .order('impact', { ascending: false })
-                .order('probability', { ascending: false });
+                .eq('risk_assessment', true)
+                .order('created_at', { ascending: false });
 
-            if (data) setRisks(data);
+            const rows = (data ?? []) as unknown as RiskActivity[];
+            setActivities(rows);
+
+            const nextForms: Record<string, RiskForm> = {};
+            rows.forEach((activity) => {
+                nextForms[activity.id] = {
+                    dangers: activity.risk_dangers ?? '',
+                    solutions: activity.risk_solutions ?? '',
+                    initiationTime: activity.risk_initiation_time ?? '',
+                };
+            });
+            setForms(nextForms);
             setLoading(false);
         }
-        loadRisks();
+
+        loadActivities();
     }, [selectedSubcontractorId]);
 
-    const handleAddRisk = async (e: React.FormEvent) => {
-        e.preventDefault();
-        setLoading(true);
-        const { data, error } = await supabase.from('risks').insert([{
-            subcontractor_id: selectedSubcontractorId,
-            description: newRisk.description,
-            probability: newRisk.probability,
-            impact: newRisk.impact,
-            status: newRisk.status
-        }]).select();
+    const updateForm = (id: string, field: keyof RiskForm, value: string) => {
+        setForms((prev) => ({
+            ...prev,
+            [id]: { ...prev[id], [field]: value },
+        }));
+    };
 
-        if (!error && data) {
-            setRisks([data[0], ...risks]);
-            setShowModal(false);
-            setNewRisk({ description: '', probability: 'Medium', impact: 'Medium', status: 'open' });
-        } else {
-            alert('Kunne ikke lagre risiko.');
+    const handleSave = async (activity: RiskActivity) => {
+        const form = forms[activity.id];
+        if (!form) return;
+        setSavingId(activity.id);
+        setSavedId(null);
+        const { error } = await supabase
+            .from('work_activities')
+            .update({
+                risk_dangers: form.dangers.trim() || null,
+                risk_solutions: form.solutions.trim() || null,
+                risk_initiation_time: form.initiationTime.trim() || null,
+            })
+            .eq('id', activity.id);
+
+        setSavingId(null);
+        if (error) {
+            alert(`Kunne ikke lagre risikovurdering: ${error.message}`);
+            return;
         }
-        setLoading(false);
+        setActivities((prev) => prev.map((a) => a.id === activity.id
+            ? {
+                ...a,
+                risk_dangers: form.dangers.trim() || null,
+                risk_solutions: form.solutions.trim() || null,
+                risk_initiation_time: form.initiationTime.trim() || null,
+            }
+            : a));
+        setSavedId(activity.id);
+        setTimeout(() => setSavedId((current) => (current === activity.id ? null : current)), 2500);
     };
 
     if (!selectedSubcontractorId) {
@@ -62,170 +114,110 @@ export default function Risks() {
         );
     }
 
-    // Helper for matrix styling
-    const getRiskColor = (prob: string, impact: string) => {
-        if (impact === 'High' && prob === 'High') return 'bg-red-500 text-white border-red-600';
-        if (impact === 'High' || prob === 'High') return 'bg-orange-500 text-white border-orange-600';
-        if (impact === 'Medium' || prob === 'Medium') return 'bg-amber-400 text-amber-900 border-amber-500';
-        return 'bg-green-500 text-white border-green-600';
-    };
-
     return (
         <div className="space-y-6">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-6 rounded-3xl shadow-sm border border-slate-200/60">
                 <div>
                     <h1 className="text-2xl font-extrabold text-slate-900 tracking-tight">Risikostyring</h1>
-                    <p className="text-slate-500 font-medium text-sm mt-1">Identifiser, evaluer og håndter prosjektrisiko</p>
+                    <p className="text-slate-500 font-medium text-sm mt-1">
+                        Risikovurdering av aktiviteter — farer, tiltak og tid for oppstart
+                    </p>
                 </div>
-                <div className="flex items-center gap-3 flex-wrap">
-                    <PageSubcontractorSelector value={selectedSubcontractorId} onChange={setSelectedSubcontractorId} />
-                    <button
-                        onClick={() => setShowModal(true)}
-                        className="bg-primary-600 text-white px-5 py-2.5 rounded-xl font-bold text-sm shadow-[0_4px_12px_rgba(37,99,235,0.25)] hover:bg-primary-700 hover:-translate-y-0.5 transition-all flex items-center shrink-0"
-                    >
-                        <Plus className="w-4 h-4 mr-2" />
-                        Registrer Risiko
-                    </button>
-                </div>
+                <PageSubcontractorSelector value={selectedSubcontractorId} onChange={setSelectedSubcontractorId} />
             </div>
 
-            <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-                {/* Matrix Visualization */}
-                <div className="xl:col-span-1 bg-white border border-slate-200/60 rounded-3xl p-6 shadow-sm flex flex-col items-center">
-                    <h3 className="font-extrabold text-slate-800 mb-8 w-full text-center text-lg">Risikomatrise</h3>
-
-                    <div className="relative w-full max-w-[280px] aspect-square">
-                        <div className="absolute -left-8 top-1/2 -translate-y-1/2 -rotate-90 origin-center text-xs font-extrabold text-slate-400 uppercase tracking-widest">
-                            Konsekvens
-                        </div>
-                        <div className="absolute -bottom-8 left-1/2 -translate-x-1/2 text-xs font-extrabold text-slate-400 uppercase tracking-widest">
-                            Sannsynlighet
-                        </div>
-
-                        <div className="w-full h-full grid grid-cols-3 grid-rows-3 gap-2.5">
-                            <div className="bg-orange-500 rounded-2xl shadow-inner border border-orange-600/50 flex items-center justify-center p-2"><span className="text-white/90 font-bold text-xs">Med/Høy</span></div>
-                            <div className="bg-red-500 rounded-2xl shadow-inner border border-red-600/50 flex items-center justify-center p-2"><span className="text-white/90 font-bold text-xs">Høy</span></div>
-                            <div className="bg-red-600 rounded-2xl shadow-inner border border-red-700/50 flex items-center justify-center p-2"><span className="text-white font-extrabold text-xs">Ekstrem</span></div>
-
-                            <div className="bg-amber-400 rounded-2xl shadow-inner border border-amber-500/50 flex items-center justify-center p-2"><span className="text-amber-900/80 font-bold text-xs">Lav/Med</span></div>
-                            <div className="bg-orange-500 rounded-2xl shadow-inner border border-orange-600/50 flex items-center justify-center p-2"><span className="text-white/90 font-bold text-xs">Med</span></div>
-                            <div className="bg-red-500 rounded-2xl shadow-inner border border-red-600/50 flex items-center justify-center p-2"><span className="text-white/90 font-bold text-xs">Høy</span></div>
-
-                            <div className="bg-green-500 rounded-2xl shadow-inner border border-green-600/50 flex items-center justify-center p-2"><span className="text-white/90 font-bold text-xs">Lav</span></div>
-                            <div className="bg-amber-400 rounded-2xl shadow-inner border border-amber-500/50 flex items-center justify-center p-2"><span className="text-amber-900/80 font-bold text-xs">Lav/Med</span></div>
-                            <div className="bg-orange-500 rounded-2xl shadow-inner border border-orange-600/50 flex items-center justify-center p-2"><span className="text-white/90 font-bold text-xs">Med/Høy</span></div>
-                        </div>
-                    </div>
+            {loading ? (
+                <div className="flex justify-center p-12">
+                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"></div>
                 </div>
-
-                {/* Risk Log */}
-                <div className="xl:col-span-2 bg-white border border-slate-200/60 rounded-3xl shadow-sm overflow-hidden flex flex-col h-[550px]">
-                    <div className="px-6 py-5 border-b border-slate-200/60 bg-slate-50/50 flex justify-between items-center rounded-t-3xl">
-                        <h3 className="font-extrabold text-slate-800 flex items-center text-lg">
-                            <AlertTriangle className="w-5 h-5 mr-3 text-red-500" />
-                            Gjeldende Risikoregister
-                        </h3>
+            ) : activities.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-16 bg-white rounded-3xl border border-dashed border-slate-300">
+                    <div className="bg-slate-50 p-5 rounded-full mb-4">
+                        <AlertTriangle className="w-12 h-12 text-slate-300" />
                     </div>
-                    <div className="flex-1 overflow-auto p-4 sm:p-6">
-                        {loading ? (
-                            <div className="flex justify-center p-8"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"></div></div>
-                        ) : risks.length === 0 ? (
-                            <div className="text-center p-12 text-slate-500 font-medium">Ingen risikoer registrert.</div>
-                        ) : (
-                            <div className="space-y-4">
-                                {risks.map(risk => (
-                                    <div key={risk.id} className="p-5 rounded-2xl border border-slate-200 bg-white hover:border-slate-300 hover:shadow-md transition-all shadow-sm flex flex-col sm:flex-row gap-5 sm:items-center justify-between group">
-                                        <div className="flex-1">
-                                            <h4 className="font-extrabold text-slate-900 mb-1.5 text-lg group-hover:text-primary-700 transition-colors">{risk.description}</h4>
-                                            <div className="text-xs font-bold text-slate-400 bg-slate-50 inline-block px-2 py-1 rounded-md">
-                                                Lagt til {new Date(risk.created_at || new Date()).toLocaleDateString()}
-                                            </div>
-                                        </div>
-                                        <div className="flex items-center gap-3 shrink-0 bg-slate-50/50 p-2 rounded-xl border border-slate-100">
-                                            <div className="flex flex-col items-center min-w-[60px]">
-                                                <span className="text-[10px] uppercase font-bold text-slate-400 mb-1.5 tracking-wider">Sannsynlighet</span>
-                                                <span className="px-3 py-1 bg-white text-slate-700 font-bold text-sm rounded-lg border border-slate-200 shadow-sm w-full text-center">{risk.probability}</span>
-                                            </div>
-                                            <div className="flex flex-col items-center min-w-[60px]">
-                                                <span className="text-[10px] uppercase font-bold text-slate-400 mb-1.5 tracking-wider">Konsekvens</span>
-                                                <span className="px-3 py-1 bg-white text-slate-700 font-bold text-sm rounded-lg border border-slate-200 shadow-sm w-full text-center">{risk.impact}</span>
-                                            </div>
-                                            <div className="flex flex-col items-center ml-2">
-                                                <span className="text-[10px] uppercase font-bold text-slate-400 mb-1.5 tracking-wider">Status</span>
-                                                <span className={cn(
-                                                    "w-12 h-9 rounded-xl border flex items-center justify-center shadow-md",
-                                                    getRiskColor(risk.probability, risk.impact)
-                                                )}>
-                                                    <AlertTriangle className="w-5 h-5" />
-                                                </span>
-                                            </div>
-                                        </div>
+                    <h3 className="text-lg font-extrabold text-slate-700">Ingen aktiviteter med risikovurdering</h3>
+                    <p className="text-slate-500 text-center mt-2 font-medium max-w-md">
+                        Kryss av for «Risikovurdering» når du oppretter en aktivitet i Bemanning eller Aktivitetsregisteret.
+                        Aktiviteten vises da her, hvor du kan fylle inn farer, tiltak og tid for oppstart.
+                    </p>
+                </div>
+            ) : (
+                <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
+                    {activities.map((activity) => {
+                        const form = forms[activity.id] ?? { dangers: '', solutions: '', initiationTime: '' };
+                        const isSaving = savingId === activity.id;
+                        const isSaved = savedId === activity.id;
+
+                        return (
+                            <div key={activity.id} className="bg-white border border-slate-200/60 rounded-3xl shadow-sm p-5 flex flex-col">
+                                <div className="flex items-start justify-between gap-3 mb-4">
+                                    <div className="min-w-0">
+                                        <h3 className="text-lg font-extrabold text-slate-900 truncate">{activity.name}</h3>
+                                        {activity.description && (
+                                            <p className="text-sm text-slate-500 font-medium mt-0.5">{activity.description}</p>
+                                        )}
+                                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">
+                                            {activity.subcontractors?.company_name || 'Ukjent underentreprenør'}
+                                        </p>
                                     </div>
-                                ))}
-                            </div>
-                        )}
-                    </div>
-                </div>
-            </div>
+                                    <span className="shrink-0 inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-amber-50 text-amber-700 border border-amber-200 text-[10px] font-extrabold uppercase tracking-widest">
+                                        <AlertTriangle className="w-3 h-3" /> Risiko
+                                    </span>
+                                </div>
 
-            {/* Add Risk Modal */}
-            {showModal && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm">
-                    <div className="bg-white rounded-3xl w-full max-w-md shadow-2xl overflow-hidden border border-slate-200">
-                        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 bg-slate-50">
-                            <h3 className="text-lg font-extrabold text-slate-800">Ny Risikoregistrering</h3>
-                            <button onClick={() => setShowModal(false)} className="text-slate-400 hover:text-red-500 p-1 rounded-lg transition-colors">
-                                <X className="w-5 h-5" />
-                            </button>
-                        </div>
-                        <form onSubmit={handleAddRisk} className="p-6 space-y-5">
-                            <div>
-                                <label className="block text-sm font-bold text-slate-700 mb-1">Beskrivelse</label>
-                                <textarea
-                                    required
-                                    rows={3}
-                                    value={newRisk.description}
-                                    onChange={(e) => setNewRisk({ ...newRisk, description: e.target.value })}
-                                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500 transition-all placeholder:text-slate-400"
-                                    placeholder="Beskriv risikoen..."
-                                />
-                            </div>
-                            <div className="grid grid-cols-2 gap-4">
-                                <div>
-                                    <label className="block text-sm font-bold text-slate-700 mb-1">Sannsynlighet</label>
-                                    <select
-                                        value={newRisk.probability}
-                                        onChange={(e) => setNewRisk({ ...newRisk, probability: e.target.value })}
-                                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 font-bold text-slate-700 focus:outline-none focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500 transition-all"
-                                    >
-                                        <option value="Low">Lav</option>
-                                        <option value="Medium">Medium</option>
-                                        <option value="High">Høy</option>
-                                    </select>
+                                <div className="space-y-3 flex-1">
+                                    <div>
+                                        <label className="block text-xs font-bold text-slate-600 mb-1">Farer</label>
+                                        <textarea
+                                            rows={3}
+                                            value={form.dangers}
+                                            onChange={(e) => updateForm(activity.id, 'dangers', e.target.value)}
+                                            placeholder="Beskriv relevante farer ved aktiviteten..."
+                                            className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500 transition-all placeholder:text-slate-400 resize-none"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs font-bold text-slate-600 mb-1">Tiltak / løsninger</label>
+                                        <textarea
+                                            rows={3}
+                                            value={form.solutions}
+                                            onChange={(e) => updateForm(activity.id, 'solutions', e.target.value)}
+                                            placeholder="Beskriv tiltak og løsninger..."
+                                            className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500 transition-all placeholder:text-slate-400 resize-none"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs font-bold text-slate-600 mb-1 flex items-center gap-1">
+                                            <Clock className="w-3.5 h-3.5" /> Tid for oppstart
+                                        </label>
+                                        <input
+                                            type="text"
+                                            value={form.initiationTime}
+                                            onChange={(e) => updateForm(activity.id, 'initiationTime', e.target.value)}
+                                            placeholder="F.eks. 2026-11-01 08:00 eller «Ved oppstart»"
+                                            className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500 transition-all placeholder:text-slate-400"
+                                        />
+                                    </div>
                                 </div>
-                                <div>
-                                    <label className="block text-sm font-bold text-slate-700 mb-1">Konsekvens</label>
-                                    <select
-                                        value={newRisk.impact}
-                                        onChange={(e) => setNewRisk({ ...newRisk, impact: e.target.value })}
-                                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 font-bold text-slate-700 focus:outline-none focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500 transition-all"
+
+                                <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-end gap-2">
+                                    {isSaved && (
+                                        <span className="text-xs font-bold text-green-600 flex items-center gap-1">
+                                            <CheckCircle2 className="w-4 h-4" /> Lagret
+                                        </span>
+                                    )}
+                                    <button
+                                        onClick={() => handleSave(activity)}
+                                        disabled={isSaving}
+                                        className="px-4 py-2 bg-primary-600 text-white text-sm font-bold rounded-xl hover:bg-primary-700 transition-colors disabled:opacity-50 flex items-center gap-1.5"
                                     >
-                                        <option value="Low">Lav</option>
-                                        <option value="Medium">Medium</option>
-                                        <option value="High">Høy</option>
-                                    </select>
+                                        <Save className="w-4 h-4" />
+                                        {isSaving ? 'Lagrer...' : 'Lagre'}
+                                    </button>
                                 </div>
                             </div>
-                            <div className="pt-2 flex gap-3">
-                                <button type="button" onClick={() => setShowModal(false)} className="flex-1 px-4 py-3 bg-white border border-slate-200 text-slate-700 font-bold rounded-xl hover:bg-slate-50 transition-colors">
-                                    Avbryt
-                                </button>
-                                <button disabled={loading} type="submit" className="flex-1 px-4 py-3 bg-primary-600 text-white font-bold rounded-xl shadow-[0_4px_12px_rgba(37,99,235,0.25)] hover:bg-primary-700 transition-colors disabled:opacity-50">
-                                    {loading ? 'Lagrer...' : 'Lagre Risiko'}
-                                </button>
-                            </div>
-                        </form>
-                    </div>
+                        );
+                    })}
                 </div>
             )}
         </div>

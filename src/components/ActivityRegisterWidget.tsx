@@ -26,7 +26,7 @@ export default function ActivityRegisterWidget({ selectedSubcontractorId: propSe
     const [loading, setLoading] = useState(true);
     const [expanded, setExpanded] = useState(false);
     const [showNewForm, setShowNewForm] = useState(false);
-    const [newActivity, setNewActivity] = useState({ name: '', start_date: '', expected_end_date: '', deadline: '', subcontractor_id: '' });
+    const [newActivity, setNewActivity] = useState({ name: '', start_date: '', expected_end_date: '', deadline: '', subcontractor_id: '', risk_assessment: false });
     const [creating, setCreating] = useState(false);
     const [sortBy, setSortBy] = useState<'date' | 'status'>('date');
     const [sortAsc, setSortAsc] = useState(true);
@@ -184,12 +184,13 @@ export default function ActivityRegisterWidget({ selectedSubcontractorId: propSe
             expected_end_date: newActivity.expected_end_date || null,
             deadline: newActivity.deadline || null,
             status: 'planned',
-            is_active: true
+            is_active: true,
+            risk_assessment: newActivity.risk_assessment
         }]).select();
         setCreating(false);
         if (!error && data) {
             setShowNewForm(false);
-            setNewActivity({ name: '', start_date: '', expected_end_date: '', deadline: '', subcontractor_id: '' });
+            setNewActivity({ name: '', start_date: '', expected_end_date: '', deadline: '', subcontractor_id: '', risk_assessment: false });
             // Update local state in place (no full refetch — keeps scroll position)
             const created = data[0] as Activity;
             preserveScroll(() => {
@@ -418,6 +419,15 @@ export default function ActivityRegisterWidget({ selectedSubcontractorId: propSe
                                     <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">Forventet ferdig</label>
                                     <DatePickerWithWeek selected={newActivity.expected_end_date ? new Date(newActivity.expected_end_date) : null} onChange={(d) => setNewActivity({ ...newActivity, expected_end_date: d ? d.toISOString().split('T')[0] : '' })} className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500/50" />
                                 </div>
+                                <label className="flex items-center gap-2 px-1 py-2 cursor-pointer shrink-0">
+                                    <input
+                                        type="checkbox"
+                                        checked={newActivity.risk_assessment}
+                                        onChange={(e) => setNewActivity({ ...newActivity, risk_assessment: e.target.checked })}
+                                        className="w-4 h-4 rounded border-slate-300 text-primary-600 focus:ring-primary-500"
+                                    />
+                                    <span className="text-xs font-bold text-slate-700">Risikovurdering</span>
+                                </label>
                                 <button type="submit" disabled={creating || !newActivity.name || !(newActivity.subcontractor_id || selectedSubcontractorId)} className="px-4 py-2 bg-primary-600 text-white text-xs font-bold rounded-lg hover:bg-primary-700 disabled:opacity-50 shrink-0">
                                     {creating ? 'Oppretter...' : 'Opprett'}
                                 </button>
