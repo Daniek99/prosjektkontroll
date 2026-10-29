@@ -519,18 +519,6 @@ export default function Bemanning() {
         setLoading(false);
     };
 
-    if (selectedSubIds.length === 0) {
-        return (
-            <div className="flex flex-col items-center justify-center py-20 bg-white rounded-3xl border border-dashed border-slate-300">
-                <div className="bg-slate-50 p-6 rounded-full mb-6 ring-8 ring-slate-50/50">
-                    <ClipboardList className="w-16 h-16 text-slate-300" />
-                </div>
-                <h3 className="text-xl font-extrabold text-slate-700">Ingen underentreprenører valgt</h3>
-                <p className="text-slate-500 text-center mt-3 font-medium">Klikk "Velg UE" i toppen for å velge underentreprenører du vil vise mannskap for.</p>
-            </div>
-        );
-    }
-
     const todayStr = (() => {
         const now = new Date();
         const year = now.getFullYear();
@@ -694,16 +682,26 @@ export default function Bemanning() {
                             </>
                         )}
                     </div>
-                    <button onClick={() => setShowActivityModal(true)} className="bg-slate-100 text-slate-700 px-4 py-2.5 rounded-xl font-bold text-sm hover:bg-slate-200 transition-colors flex items-center shrink-0">
+                    <button onClick={() => setShowActivityModal(true)} disabled={!selectedSubcontractorId} className="bg-slate-100 text-slate-700 px-4 py-2.5 rounded-xl font-bold text-sm hover:bg-slate-200 transition-colors flex items-center shrink-0 disabled:opacity-50 disabled:cursor-not-allowed">
                         <Settings className="w-4 h-4 mr-2" />
                         Administrer Aktiviteter
                     </button>
-                    <button onClick={() => { resetForm(); setShowManpowerModal(true); }} className="bg-primary-600 text-white px-4 py-2.5 rounded-xl font-bold text-sm shadow-[0_4px_12px_rgba(37,99,235,0.25)] hover:bg-primary-700 transition-colors flex items-center shrink-0">
+                    <button onClick={() => { resetForm(); setShowManpowerModal(true); }} disabled={!selectedSubcontractorId} className="bg-primary-600 text-white px-4 py-2.5 rounded-xl font-bold text-sm shadow-[0_4px_12px_rgba(37,99,235,0.25)] hover:bg-primary-700 transition-colors flex items-center shrink-0 disabled:opacity-50 disabled:cursor-not-allowed">
                         <Plus className="w-4 h-4 mr-2" />
                         Loggfør Mannskap
                     </button>
                 </div>
             </div>
+
+            {selectedSubIds.length === 0 && (
+                <div className="flex flex-col items-center justify-center py-16 bg-white rounded-3xl border border-dashed border-slate-300">
+                    <div className="bg-slate-50 p-5 rounded-full mb-4">
+                        <ClipboardList className="w-12 h-12 text-slate-300" />
+                    </div>
+                    <h3 className="text-lg font-extrabold text-slate-700">Ingen underentreprenører valgt</h3>
+                    <p className="text-slate-500 text-center mt-2 font-medium">Klikk "Velg UE" for å velge én eller flere underentreprenører du vil vise mannskap for.</p>
+                </div>
+            )}
 
             {/* Mannskapsoversikt — global overview of all selected subcontractors (at the top) */}
             {selectedSubIds.length > 0 && (

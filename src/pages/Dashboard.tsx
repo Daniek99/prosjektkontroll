@@ -26,6 +26,14 @@ export default function Dashboard() {
     const [inProgressActivities, setInProgressActivities] = useState<any[]>([]);
     const [updatingStatus, setUpdatingStatus] = useState<string | null>(null);
 
+    // Default the dashboard's subcontractor filter to the first subcontractor
+    // so the Manpower and Activity widgets have data to show.
+    useEffect(() => {
+        if (!selectedDashboardSubcontractorId && subcontractorsData.length > 0) {
+            setSelectedDashboardSubcontractorId(subcontractorsData[0].id);
+        }
+    }, [subcontractorsData, selectedDashboardSubcontractorId]);
+
     // Scroll preservation: keep the dashboard in the same spot after a status change
     const preserveScroll = (fn: () => void) => {
         const prevY = window.scrollY;
