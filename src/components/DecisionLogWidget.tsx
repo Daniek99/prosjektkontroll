@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { PenTool, Plus, ChevronDown, ChevronUp, ExternalLink, Calendar } from 'lucide-react';
 import { supabase } from '../lib/supabase';
@@ -15,6 +15,21 @@ type DecisionLog = {
     created_at: string;
 };
 
+type SubcontractorGroup = {
+    id: string | null;
+    name: string;
+    logs: DecisionLog[];
+};
+
+// 0 means "show all subcontractors".
+const VISIBLE_OPTIONS = [
+    { value: 1, label: '1 UE' },
+    { value: 2, label: '2 UE' },
+    { value: 3, label: '3 UE' },
+    { value: 4, label: '4 UE' },
+    { value: 0, label: 'Alle' },
+];
+
 export default function DecisionLogWidget({ selectedSubcontractorId: propSelectedSubcontractorId }: { selectedSubcontractorId?: string | null }) {
     const { selectedSubcontractorId: contextSelectedSubcontractorId, subcontractors } = useSubcontractor();
     const { canAccess } = useProject();
@@ -27,10 +42,12 @@ export default function DecisionLogWidget({ selectedSubcontractorId: propSelecte
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState('');
+    const [visibleCount, setVisibleCount] = useState(1);
     const [form, setForm] = useState({
         subject: '',
         content: '',
         date: new Date().toISOString().split('T')[0],
+        subcontractor_id: '',
     });
 
     const canView = canAccess('decisions');
@@ -41,15 +58,11 @@ export default function DecisionLogWidget({ selectedSubcontractorId: propSelecte
             return;
         }
         setLoading(true);
-        let query = supabase
+        const { data, error: err } = await supabase
             .from('decision_logs')
             .select('id, subject, content, date, subcontractor_id, created_at')
             .order('date', { ascending: false })
-            .limit(20);
-        if (selectedSubcontractorId) {
-            query = query.eq('subcontractor_id', selectedSubcontractorId);
-        }
-        const { data, error: err } = await query;
+            .limit(200);
         if (err) {
             console.error('Error loading decision logs', err);
             setLogs([]);
@@ -57,11 +70,49 @@ export default function DecisionLogWidget({ selectedSubcontractorId: propSelecte
             setLogs((data ?? []) as DecisionLog[]);
         }
         setLoading(false);
-    }, [canView, selectedSubcontractorId]);
+    }, [canView]);
 
     useEffect(() => {
         loadLogs();
     }, [loadLogs]);
+
+    // Default the quick-add form to the currently selected subcontractor.
+    useEffect(() => {
+        setForm((prev) => ({
+            ...prev,
+            subcontractor_id: prev.subcontractor_id || selectedSubcontractorId || '',
+        }));
+    }, [selectedSubcontractorId]);
+
+    const subName = useCallback((id: string | null) =>
+        subcontractors.find((s) => s.id === id)?.company_name ?? 'Uten UE', [subcontractors]);
+
+    // Group logs by subcontractor. The currently selected subcontractor is
+    // shown first, followed by the rest alphabetically.
+    const groups = useMemo<SubcontractorGroup[]>(() => {
+        const map = new Map<string, SubcontractorGroup>();
+        logs.forEach((log) => {
+            const key = log.subcontractor_id ?? 'none';
+            if (!map.has(key)) {
+                map.set(key, {
+                    id: log.subcontractor_id,
+                    name: subName(log.subcontractor_id),
+                    logs: [],
+                });
+            }
+            map.get(key)!.logs.push(log);
+        });
+
+        const list = Array.from(map.values());
+        list.sort((a, b) => {
+            if (selectedSubcontractorId) {
+                if (a.id === selectedSubcontractorId) return -1;
+                if (b.id === selectedSubcontractorId) return 1;
+            }
+            return a.name.localeCompare(b.name);
+        });
+        return list;
+    }, [logs, selectedSubcontractorId, subName]);
 
     const handleAdd = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -72,7 +123,7 @@ export default function DecisionLogWidget({ selectedSubcontractorId: propSelecte
             subject: form.subject.trim(),
             content: form.content.trim() || null,
             date: form.date,
-            subcontractor_id: selectedSubcontractorId || null,
+            subcontractor_id: form.subcontractor_id || null,
             created_by: user?.id ?? null,
         }]);
         setSaving(false);
@@ -80,16 +131,24 @@ export default function DecisionLogWidget({ selectedSubcontractorId: propSelecte
             setError(err.message);
             return;
         }
-        setForm({ subject: '', content: '', date: new Date().toISOString().split('T')[0] });
+        setForm({
+            subject: '',
+            content: '',
+            date: new Date().toISOString().split('T')[0],
+            subcontractor_id: form.subcontractor_id,
+        });
         await loadLogs();
     };
 
     if (!canView) return null;
 
-    const subName = (id: string | null) =>
-        subcontractors.find((s) => s.id === id)?.company_name ?? 'Alle';
-
     const latest = logs[0];
+
+    // Width of each subcontractor column. With a numeric count the columns
+    // share the widget width; "Alle" uses a fixed width and scrolls.
+    const columnStyle = visibleCount > 0
+        ? { width: `calc((100% - ${(visibleCount - 1) * 8}px) / ${visibleCount})` }
+        : { width: '170px' };
 
     return (
         <div className="bg-white rounded-3xl border border-slate-200/60 p-4 shadow-sm flex flex-col">
@@ -167,11 +226,21 @@ export default function DecisionLogWidget({ selectedSubcontractorId: propSelecte
                             className="w-full px-2 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-[10px] font-medium text-slate-700 focus:outline-none focus:ring-1 focus:ring-primary-500/50 placeholder:text-slate-400 resize-none"
                         />
                         <div className="flex gap-1.5">
+                            <select
+                                value={form.subcontractor_id}
+                                onChange={(e) => setForm({ ...form, subcontractor_id: e.target.value })}
+                                className="flex-1 min-w-0 px-2 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-[10px] font-medium text-slate-700 focus:outline-none focus:ring-1 focus:ring-primary-500/50"
+                            >
+                                <option value="">Uten UE</option>
+                                {subcontractors.map((sub) => (
+                                    <option key={sub.id} value={sub.id}>{sub.company_name}</option>
+                                ))}
+                            </select>
                             <input
                                 type="date"
                                 value={form.date}
                                 onChange={(e) => setForm({ ...form, date: e.target.value })}
-                                className="flex-1 min-w-0 px-2 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-[10px] font-medium text-slate-700 focus:outline-none focus:ring-1 focus:ring-primary-500/50"
+                                className="w-[110px] shrink-0 px-2 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-[10px] font-medium text-slate-700 focus:outline-none focus:ring-1 focus:ring-primary-500/50"
                             />
                             <button
                                 type="submit"
@@ -187,34 +256,63 @@ export default function DecisionLogWidget({ selectedSubcontractorId: propSelecte
                         {error && <p className="text-[9px] text-red-600 font-semibold">{error}</p>}
                     </form>
 
+                    <div className="flex items-center justify-between gap-2">
+                        <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Vis</span>
+                        <select
+                            value={visibleCount}
+                            onChange={(e) => setVisibleCount(Number(e.target.value))}
+                            aria-label="Antall synlige underentreprenører"
+                            className="bg-slate-50 border border-slate-200 rounded-lg px-1.5 py-1 text-[10px] font-bold text-slate-600 focus:outline-none focus:ring-1 focus:ring-primary-500/50 cursor-pointer"
+                        >
+                            {VISIBLE_OPTIONS.map((option) => (
+                                <option key={option.value} value={option.value}>{option.label}</option>
+                            ))}
+                        </select>
+                    </div>
+
                     {loading ? (
                         <div className="flex justify-center py-2">
                             <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-primary-600"></div>
                         </div>
-                    ) : logs.length === 0 ? (
+                    ) : groups.length === 0 ? (
                         <p className="text-[10px] text-slate-400 text-center py-2">Ingen beslutninger ennå.</p>
                     ) : (
-                        <div className="space-y-1.5 max-h-56 overflow-y-auto">
-                            {logs.map((log) => (
-                                <button
-                                    key={log.id}
-                                    onClick={() => navigate('/decisions')}
-                                    className="w-full text-left bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg px-2 py-1.5 transition-colors"
+                        <div className="flex gap-2 overflow-x-auto pb-1">
+                            {groups.map((group) => (
+                                <div
+                                    key={group.id ?? 'none'}
+                                    className="shrink-0"
+                                    style={columnStyle}
                                 >
-                                    <div className="flex items-center justify-between gap-2 mb-0.5">
-                                        <span className="text-[9px] font-bold text-slate-500 uppercase tracking-wide flex items-center gap-1">
-                                            <Calendar className="w-2.5 h-2.5" />
-                                            {new Date(`${log.date}T00:00:00`).toLocaleDateString('no-NO', { day: 'numeric', month: 'short' })}
-                                        </span>
-                                        <span className="text-[9px] font-bold text-slate-400 truncate max-w-[90px]">
-                                            {subName(log.subcontractor_id)}
-                                        </span>
+                                    <div className="bg-slate-50 border border-slate-200 rounded-lg p-2 h-full flex flex-col">
+                                        <div className="flex items-center justify-between gap-1 mb-1">
+                                            <span className="text-[10px] font-extrabold text-slate-700 truncate" title={group.name}>
+                                                {group.name}
+                                            </span>
+                                            <span className="text-[9px] font-bold text-slate-400 shrink-0">{group.logs.length}</span>
+                                        </div>
+                                        <div className="space-y-1 overflow-y-auto max-h-40">
+                                            {group.logs.map((log) => (
+                                                <button
+                                                    key={log.id}
+                                                    onClick={() => navigate('/decisions')}
+                                                    className="w-full text-left bg-white hover:bg-slate-100 border border-slate-200 rounded-md px-1.5 py-1 transition-colors"
+                                                >
+                                                    <div className="flex items-center gap-1 mb-0.5">
+                                                        <Calendar className="w-2.5 h-2.5 text-slate-400 shrink-0" />
+                                                        <span className="text-[8px] font-bold text-slate-500 uppercase tracking-wide">
+                                                            {new Date(`${log.date}T00:00:00`).toLocaleDateString('no-NO', { day: 'numeric', month: 'short' })}
+                                                        </span>
+                                                    </div>
+                                                    <p className="text-[10px] font-bold text-slate-700 truncate">{log.subject}</p>
+                                                    {log.content && (
+                                                        <p className="text-[9px] font-medium text-slate-500 line-clamp-2 whitespace-pre-wrap">{log.content}</p>
+                                                    )}
+                                                </button>
+                                            ))}
+                                        </div>
                                     </div>
-                                    <p className="text-[10px] font-bold text-slate-700 truncate">{log.subject}</p>
-                                    {log.content && (
-                                        <p className="text-[9px] font-medium text-slate-500 line-clamp-2 whitespace-pre-wrap">{log.content}</p>
-                                    )}
-                                </button>
+                                </div>
                             ))}
                         </div>
                     )}
