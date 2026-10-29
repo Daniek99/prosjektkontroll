@@ -43,6 +43,127 @@ const parseRecurrence = (sourceEvent: any): string => {
     return match ? match[1] : 'none';
 };
 
+// Minimum real overlap (in minutes) before two events are considered
+// "stacked" side-by-side. Events that merely touch (one ends when the next
+// starts) or overlap by less than this are laid out underneath each other.
+const MIN_STACK_OVERLAP_MINUTES = 5;
+
+interface LayoutRange {
+    start: number;
+    end: number;
+    top: number;
+    height: number;
+}
+
+interface LayoutProxy {
+    event: unknown;
+    start: number;
+    end: number;
+    top: number;
+    height: number;
+    column: number;
+    columns: number;
+}
+
+interface LayoutArgs {
+    events: unknown[];
+    slotMetrics: {
+        getRange: (start: Date, end: Date) => LayoutRange;
+    };
+    accessors: {
+        start: (event: unknown) => Date;
+        end: (event: unknown) => Date;
+    };
+}
+
+/**
+ * Custom day layout algorithm for react-big-calendar.
+ *
+ * The default `overlap` algorithm uses a 30-minute `minimumStartDifference`,
+ * which causes short back-to-back events to be rendered side-by-side (stacked)
+ * even though they do not really overlap. This algorithm only stacks events
+ * whose actual time overlap is at least MIN_STACK_OVERLAP_MINUTES; everything
+ * else is placed in its own full-width column, i.e. underneath each other.
+ */
+function getStyledEventsWithMinOverlap({ events, slotMetrics, accessors }: LayoutArgs) {
+    if (!events || events.length === 0) return [];
+
+    const proxies: LayoutProxy[] = events.map((event) => {
+        const range = slotMetrics.getRange(accessors.start(event), accessors.end(event));
+        return {
+            event,
+            start: range.start,
+            end: range.end,
+            top: range.top,
+            height: range.height,
+            column: 0,
+            columns: 1,
+        };
+    });
+
+    // Sort by start time, then by longest duration first.
+    proxies.sort((a, b) => a.start - b.start || b.end - a.end);
+
+    // Group events into clusters that are connected by a significant overlap.
+    const clusters: LayoutProxy[][] = [];
+    let currentCluster: LayoutProxy[] = [];
+    let clusterEnd = -Infinity;
+
+    for (const proxy of proxies) {
+        if (currentCluster.length === 0) {
+            currentCluster.push(proxy);
+            clusterEnd = proxy.end;
+        } else if (proxy.start < clusterEnd - MIN_STACK_OVERLAP_MINUTES) {
+            // Overlaps the cluster by at least MIN_STACK_OVERLAP_MINUTES.
+            currentCluster.push(proxy);
+            clusterEnd = Math.max(clusterEnd, proxy.end);
+        } else {
+            clusters.push(currentCluster);
+            currentCluster = [proxy];
+            clusterEnd = proxy.end;
+        }
+    }
+    if (currentCluster.length > 0) clusters.push(currentCluster);
+
+    // Assign columns within each cluster. Two events may share a column when
+    // their real overlap is below the threshold (so they sit under each other).
+    for (const cluster of clusters) {
+        const columns: LayoutProxy[][] = [];
+        for (const proxy of cluster) {
+            let placed = false;
+            for (let c = 0; c < columns.length; c++) {
+                const hasSignificantOverlap = columns[c].some((other) =>
+                    Math.min(other.end, proxy.end) - Math.max(other.start, proxy.start) >= MIN_STACK_OVERLAP_MINUTES
+                );
+                if (!hasSignificantOverlap) {
+                    columns[c].push(proxy);
+                    proxy.column = c;
+                    placed = true;
+                    break;
+                }
+            }
+            if (!placed) {
+                proxy.column = columns.length;
+                columns.push([proxy]);
+            }
+        }
+        const numColumns = columns.length;
+        for (const proxy of cluster) {
+            proxy.columns = numColumns;
+        }
+    }
+
+    return proxies.map((proxy) => ({
+        event: proxy.event,
+        style: {
+            top: proxy.top,
+            height: proxy.height,
+            width: 100 / proxy.columns,
+            xOffset: (100 / proxy.columns) * proxy.column,
+        },
+    }));
+}
+
 const messages = {
     allDay: 'Hele dagen',
     previous: 'Forrige',
@@ -383,14 +504,22 @@ export default function CalendarWidget() {
         }
     };
 
-    const eventPropGetter = useCallback(() => {
+    const eventPropGetter = useCallback((event: CustomEvent) => {
+        const eventStart = event.start instanceof Date ? event.start.getTime() : Number.NaN;
+        const eventEnd = event.end instanceof Date ? event.end.getTime() : Number.NaN;
+        const hasSignificantOverlap = events.some((other) => {
+            if (other.id === event.id || !(other.start instanceof Date) || !(other.end instanceof Date)) return false;
+            const overlapMs = Math.min(eventEnd, other.end.getTime()) - Math.max(eventStart, other.start.getTime());
+            return overlapMs >= MIN_STACK_OVERLAP_MINUTES * 60_000;
+        });
+
         return {
-            className: 'bg-[#4285F4] border-none text-white text-xs font-semibold rounded shadow-sm hover:opacity-90 transition-opacity',
+            className: `bg-[#4285F4] border-none text-white text-xs font-semibold rounded shadow-sm hover:opacity-90 transition-opacity ${hasSignificantOverlap ? '' : 'rbc-event-no-significant-overlap'}`,
             style: {
                 borderRadius: '6px'
             }
         };
-    }, []);
+    }, [events]);
 
     const EventComponent = ({ event }: EventProps<CustomEvent>) => {
         return (
@@ -437,6 +566,10 @@ export default function CalendarWidget() {
                     .rbc-today { background-color: #f0fdf4; }
                     .rbc-time-view, .rbc-month-view { border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden; }
                     .rbc-event { padding: 2px 4px; }
+                    .rbc-time-view .rbc-event-no-significant-overlap {
+                        width: 100% !important;
+                        left: 0 !important;
+                    }
                     .rbc-addons-dnd .rbc-addons-dnd-resizable { padding: 0 !important; }
                 `}
             </style>
@@ -528,6 +661,7 @@ export default function CalendarWidget() {
                         onSelectSlot={handleSelectSlot}
                         onSelectEvent={handleSelectEvent}
                         eventPropGetter={eventPropGetter}
+                        dayLayoutAlgorithm={getStyledEventsWithMinOverlap}
                         components={{
                             event: EventComponent
                         }}

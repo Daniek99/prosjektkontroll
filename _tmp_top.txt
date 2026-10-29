@@ -1,0 +1,55 @@
+import { useEffect, useState } from 'react';
+import { useSubcontractor } from '../contexts/SubcontractorContext';
+import { supabase } from '../lib/supabase';
+import { Users, Plus, X, Edit2, Trash2, ChevronLeft, ChevronRight, Clock, Settings, ClipboardList, Minus, Check, Copy, Repeat } from 'lucide-react';
+import DatePickerWithWeek from '../components/DatePickerWithWeek';
+
+export default function Bemanning() {
+    const { selectedSubcontractorId } = useSubcontractor();
+    const [manpower, setManpower] = useState<any[]>([]);
+    const [activities, setActivities] = useState<any[]>([]);
+    const [loading, setLoading] = useState(true);
+    const [showManpowerModal, setShowManpowerModal] = useState(false);
+    const [showActivityModal, setShowActivityModal] = useState(false);
+    const [newActivityName, setNewActivityName] = useState('');
+    const [newActivityDesc, setNewActivityDesc] = useState('');
+    const [newActivityChangeOrder, setNewActivityChangeOrder] = useState('');
+    const [editingActivityId, setEditingActivityId] = useState<string | null>(null);
+    const [editActivityName, setEditActivityName] = useState('');
+    const [editActivityDesc, setEditActivityDesc] = useState('');
+    const [editActivityChangeOrder, setEditActivityChangeOrder] = useState('');
+    const [showQuickAddActivity, setShowQuickAddActivity] = useState(false);
+    const [hideCompletedActivities, setHideCompletedActivities] = useState(true);
+
+    // Calendar State
+    const [viewMode, setViewMode] = useState<'week' | 'month'>('week');
+    const [currentWeekStart, setCurrentWeekStart] = useState(() => {
+        const now = new Date();
+        const day = now.getDay() || 7; // Convert Sun (0) to 7
+        now.setHours(0, 0, 0, 0);
+        return new Date(now.getTime() - (day - 1) * 24 * 60 * 60 * 1000); // Monday
+    });
+
+    const [currentMonthStart, setCurrentMonthStart] = useState(() => {
+        const now = new Date();
+        return new Date(now.getFullYear(), now.getMonth(), 1);
+    });
+
+    const [newManpower, setNewManpower] = useState<{
+        id?: string;
+        date: string;
+        contract_workers: number | string;
+        billable_workers: number | string;
+        total_workers_per_day?: number | string;
+        notes: string;
+        billable_comment: string;
+        billable_activities: Array<{ activity_id: string, hours: string | number }>;
+        position_ids: string[];
+    }>({
+        date: (() => {
+            const now = new Date();
+            const year = now.getFullYear();
+            const month = String(now.getMonth() + 1).padStart(2, '0');
+            const day = String(now.getDate()).padStart(2, '0');
+            return `${year}-${month}-${day}`;
+        })(),

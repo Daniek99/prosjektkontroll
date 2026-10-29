@@ -1,0 +1,36 @@
+                                </div>
+                            );
+                            })
+                        )}
+                    </div>
+                </div>
+            </div>
+
+            {/* Miniature overview — compact week strips for all selected subcontractors, scrollable */}
+            {selectedSubIds.length > 0 && (
+                <div className="bg-white border border-slate-200/60 rounded-3xl shadow-sm p-4 md:p-6">
+                    <div className="flex items-center justify-between mb-4">
+                        <h3 className="font-extrabold text-slate-800 flex items-center">
+                            <Users className="w-5 h-5 mr-2 text-primary-500" />
+                            Mannskapsoversikt ({selectedSubIds.length})
+                        </h3>
+                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Uke {getWeekNumber(currentWeekStart)}</span>
+                    </div>
+                    <div className="space-y-2">
+                        {[...subcontractors].filter(s => selectedSubIds.includes(s.id)).sort((a, b) => {
+                            const aP = a.type === 'project' ? 1 : 0, bP = b.type === 'project' ? 1 : 0;
+                            if (aP !== bP) return aP - bP;
+                            return a.company_name.localeCompare(b.company_name, 'no');
+                        }).map(sub => {
+                            const subs = manpowerBySub[sub.id] || [];
+                            return (
+                                <div key={sub.id} className={`flex items-center gap-3 rounded-xl border p-2 ${sub.type === 'project' ? 'bg-purple-50/40 border-purple-200' : 'bg-slate-50 border-slate-200'}`}>
+                                    <div className="min-w-[160px] max-w-[200px] flex items-center gap-2">
+                                        <span className="text-xs font-bold text-slate-700 truncate">{sub.company_name}</span>
+                                        {sub.type === 'project' && <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-extrabold bg-purple-100 text-purple-700 border border-purple-200 shrink-0">Prosjekt</span>}
+                                    </div>
+                                    <div className="flex-1 grid grid-cols-7 gap-1">
+                                        {Array.from({ length: 7 }).map((_, i) => {
+                                            const date = new Date(currentWeekStart.getTime() + i * 24 * 60 * 60 * 1000);
+                                            const ds = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+                                            const log = subs.find(l => l.date === ds);

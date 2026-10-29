@@ -1,0 +1,58 @@
+        }
+        setLoading(false);
+    };
+
+    if (!selectedSubcontractorId) {
+        return (
+            <div className="flex flex-col items-center justify-center py-20 bg-white rounded-3xl border border-dashed border-slate-300">
+                <div className="bg-slate-50 p-6 rounded-full mb-6 ring-8 ring-slate-50/50">
+                    <ClipboardList className="w-16 h-16 text-slate-300" />
+                </div>
+                <h3 className="text-xl font-extrabold text-slate-700">Ingen underentreprenør valgt</h3>
+                <p className="text-slate-500 text-center mt-3 font-medium">Vennligst velg en underentreprenør for å se byggeplasslogger.</p>
+            </div>
+        );
+    }
+
+    const todayStr = (() => {
+        const now = new Date();
+        const year = now.getFullYear();
+        const month = String(now.getMonth() + 1).padStart(2, '0');
+        const day = String(now.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+    })();
+    const hasLoggedToday = manpower.some(log => log.date === todayStr);
+    const isPast14 = new Date().getHours() >= 14;
+    const showReminder = isPast14 && !hasLoggedToday;
+
+    return (
+        <div className="space-y-6">
+            {showReminder && (
+                <div className="bg-amber-50 border border-amber-200 rounded-3xl p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 animate-in fade-in duration-300">
+                    <div className="flex items-start gap-3.5">
+                        <div className="bg-amber-100 p-2.5 rounded-2xl text-amber-700 shrink-0">
+                            <Clock className="w-6 h-6 animate-pulse" />
+                        </div>
+                        <div>
+                            <h4 className="text-base font-extrabold text-amber-900">Mangler bemanning for i dag</h4>
+                            <p className="text-sm text-amber-700 font-medium mt-0.5">
+                                Husk å loggføre dagens bemanning. Fristen er kl. 14:00, og den er nå passert.
+                            </p>
+                        </div>
+                    </div>
+                    <button
+                        onClick={() => {
+                            resetForm();
+                            setNewManpower(prev => ({
+                                ...prev,
+                                date: todayStr
+                            }));
+                            setShowManpowerModal(true);
+                        }}
+                        className="bg-amber-600 text-white px-4 py-2.5 rounded-xl font-bold text-sm shadow-[0_4px_12px_rgba(217,119,6,0.2)] hover:bg-amber-700 transition-colors shrink-0 flex items-center justify-center gap-1.5"
+                    >
+                        <Plus className="w-4 h-4" />
+                        Loggfør nå
+                    </button>
+                </div>
+            )}

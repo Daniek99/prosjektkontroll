@@ -1,0 +1,122 @@
+        if (!error) {
+            setActivities(activities.filter(a => a.id !== activityId));
+        } else {
+            alert('Kunne ikke slette aktivitet. Prøv igjen.');
+        }
+    };
+
+    useEffect(() => {
+        if (!selectedSubcontractorId) return;
+
+        async function loadLogs() {
+            setLoading(true);
+            const { data: mData } = await supabase
+                .from('daily_manpower')
+                .select(`
+                    *,
+                    daily_manpower_positions (
+                        global_area_id
+                    )
+                `)
+                .eq('subcontractor_id', selectedSubcontractorId)
+                .order('date', { ascending: false })
+                .limit(100); // Increased limit to cover a month or more
+
+            if (mData) setManpower(mData);
+            setLoading(false);
+        }
+        loadLogs();
+    }, [selectedSubcontractorId]);
+
+    const handleAddManpower = async (e: React.FormEvent) => {
+        e.preventDefault();
+        setLoading(true);
+
+        const validActivities = newManpower.billable_activities.filter(act => act.activity_id);
+        const totalWorkers = Number(newManpower.total_workers_per_day) || 0;
+        if (totalWorkers === 0) {
+            alert('Totalt antall arbeidere må registreres.');
+            return;
+        }
+        const payload: any = {
+            subcontractor_id: selectedSubcontractorId,
+            date: newManpower.date,
+            workers_count: totalWorkers,
+            contract_workers: Number(newManpower.contract_workers) || 0,
+            billable_workers: Number(newManpower.billable_workers) || 0,
+            is_contract_work: Number(newManpower.contract_workers) > 0,
+            notes: newManpower.notes,
+            billable_comment: newManpower.billable_comment,
+            activity_id: validActivities.length === 1 ? validActivities[0].activity_id : null,
+            hours_contract: 0,
+            hours_billable: validActivities.reduce((sum, act) => sum + (Number(act.hours) || 0), 0),
+            billable_activities: validActivities
+        };
+
+        if (newManpower.id) {
+            payload.id = newManpower.id;
+        }
+
+        let response;
+        if (newManpower.id) {
+            response = await supabase.from('daily_manpower').update(payload).eq('id', newManpower.id).select();
+        } else {
+            response = await supabase.from('daily_manpower').insert([payload]).select();
+        }
+
+        const { data, error } = response;
+
+        if (!error && data) {
+            const manpowerId = data[0].id;
+            
+            // Handle position/area relationships
+            if (newManpower.position_ids.length > 0) {
+                // Delete existing positions for this manpower entry
+                await supabase.from('daily_manpower_positions').delete().eq('daily_manpower_id', manpowerId);
+                
+                // Insert new positions
+                const positionInserts = newManpower.position_ids.map(areaId => ({
+                    daily_manpower_id: manpowerId,
+                    global_area_id: areaId
+                }));
+                await supabase.from('daily_manpower_positions').insert(positionInserts);
+            } else if (newManpower.id) {
+                // If editing and no positions selected, delete existing
+                await supabase.from('daily_manpower_positions').delete().eq('daily_manpower_id', manpowerId);
+            }
+            
+            let updatedManpower = [...manpower];
+            if (newManpower.id) {
+                updatedManpower = updatedManpower.map(m => m.id === newManpower.id ? data[0] : m);
+            } else {
+                updatedManpower = [data[0], ...updatedManpower];
+            }
+            setManpower(updatedManpower.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()));
+            setShowManpowerModal(false);
+            resetForm();
+        } else {
+            alert('Kunne ikke lagre mannskapslogg. Vennligst prøv igjen.');
+        }
+        setLoading(false);
+    };
+
+    if (!selectedSubcontractorId) {
+        return (
+            <div className="flex flex-col items-center justify-center py-20 bg-white rounded-3xl border border-dashed border-slate-300">
+                <div className="bg-slate-50 p-6 rounded-full mb-6 ring-8 ring-slate-50/50">
+                    <ClipboardList className="w-16 h-16 text-slate-300" />
+                </div>
+                <h3 className="text-xl font-extrabold text-slate-700">Ingen underentreprenør valgt</h3>
+                <p className="text-slate-500 text-center mt-3 font-medium">Vennligst velg en underentreprenør for å se byggeplasslogger.</p>
+            </div>
+        );
+    }
+
+    const todayStr = (() => {
+        const now = new Date();
+        const year = now.getFullYear();
+        const month = String(now.getMonth() + 1).padStart(2, '0');
+        const day = String(now.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+    })();
+    const hasLoggedToday = manpower.some(log => log.date === todayStr);

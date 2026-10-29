@@ -12,7 +12,7 @@ export const DATASETS = [
     { key: 'risks', label: 'Risikostyring' },
     { key: 'bemanning', label: 'Bemanning' },
     { key: 'areas', label: 'Områder' },
-    { key: 'diary', label: 'Dagbok' },
+    { key: 'diary', label: 'Notater' },
     { key: 'decisions', label: 'Prosjektering' },
     { key: 'contacts', label: 'Kontakter' },
     { key: 'statistics', label: 'Statistikk' },
@@ -21,3 +21,11 @@ export const DATASETS = [
 export type DatasetKey = (typeof DATASETS)[number]['key'];
 
 export const DATASET_KEYS: DatasetKey[] = DATASETS.map((d) => d.key);
+
+// The "Notater" (notes) section is a personal feature that belongs to the
+// user's profile rather than to a specific project. Its access is stored on
+// `user_profiles.notes_access` and it is therefore excluded from the
+// per-project dataset grid.
+export const NOTES_DATASET_KEY: DatasetKey = 'diary';
+
+export const PROJECT_DATASETS = DATASETS.filter((d) => d.key !== NOTES_DATASET_KEY);

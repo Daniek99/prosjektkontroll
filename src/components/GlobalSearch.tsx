@@ -77,7 +77,7 @@ export default function GlobalSearch({ isMobile, onSearchClose }: { isMobile?: b
                     newResults.push({
                         id: d.id,
                         type: 'diary',
-                        title: 'Dagboknotat',
+                        title: 'Notat',
                         description: d.content?.substring(0, 60) + '...',
                         path: '/diary'
                     });

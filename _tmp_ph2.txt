@@ -1,0 +1,21 @@
+                        Administrer Aktiviteter
+                    </button>
+                    <button onClick={() => { resetForm(); setShowManpowerModal(true); }} className="bg-primary-600 text-white px-4 py-2.5 rounded-xl font-bold text-sm shadow-[0_4px_12px_rgba(37,99,235,0.25)] hover:bg-primary-700 transition-colors flex items-center shrink-0">
+                        <Plus className="w-4 h-4 mr-2" />
+                        Loggfør Mannskap
+                    </button>
+                </div>
+            </div>
+
+            <div>
+                {/* Manpower Weekly Calendar */}
+                <div className="bg-white border border-slate-200/60 rounded-3xl shadow-sm flex flex-col h-[500px]">
+                    <div className="px-6 py-5 border-b border-slate-200/60 bg-slate-50/50 flex justify-between items-center rounded-t-3xl">
+                        <h3 className="font-extrabold text-slate-800 flex items-center">
+                            <Users className="w-5 h-5 mr-2 text-primary-500" />
+                            Daglig Mannskap
+                        </h3>
+                        <div className="flex items-center space-x-4">
+                            <div className="flex bg-slate-200/50 p-1 rounded-lg">
+                                <button
+                                    onClick={() => setViewMode('week')}

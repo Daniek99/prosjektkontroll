@@ -37,7 +37,7 @@ const navItems: { name: string; icon: typeof LayoutDashboard; path: string; data
     { name: 'Risikostyring', icon: ShieldAlert, path: '/risks', dataset: 'risks' },
     { name: 'Bemanning', icon: ClipboardList, path: '/bemanning', dataset: 'bemanning' },
     { name: 'Områder', icon: Map, path: '/areas', dataset: 'areas' },
-    { name: 'Dagbok', icon: BookOpen, path: '/diary', dataset: 'diary' },
+    { name: 'Notater', icon: BookOpen, path: '/diary', dataset: 'diary' },
     { name: 'Prosjektering', icon: PenTool, path: '/decisions', dataset: 'decisions' },
     { name: 'Kontakter', icon: Contact, path: '/contacts', dataset: 'contacts' },
     { name: 'Statistikk', icon: BarChart3, path: '/statistics', dataset: 'statistics' },

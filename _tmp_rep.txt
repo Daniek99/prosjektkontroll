@@ -1,0 +1,30 @@
+
+    // Repeat entry: copy an existing day's data to the next day and open modal
+    const handleRepeatEntry = (sourceDateStr: string) => {
+        const sourceLog = manpower.find((log: any) => log.date === sourceDateStr);
+        if (!sourceLog) return;
+
+        const nextDate = new Date(sourceDateStr + 'T00:00:00');
+        nextDate.setDate(nextDate.getDate() + 1);
+        const nextDateStr = `${nextDate.getFullYear()}-${String(nextDate.getMonth() + 1).padStart(2, '0')}-${String(nextDate.getDate()).padStart(2, '0')}`;
+
+        const positionIds = sourceLog.daily_manpower_positions?.map((p: any) => p.global_area_id) || [];
+
+        setNewManpower({
+            date: nextDateStr,
+            contract_workers: sourceLog.contract_workers ?? '',
+            billable_workers: sourceLog.billable_workers ?? '',
+            total_workers_per_day: sourceLog.total_workers_per_day ?? '',
+            notes: sourceLog.notes || '',
+            billable_comment: sourceLog.billable_comment || sourceLog.comment || '',
+            billable_activities: sourceLog.billable_activities || (sourceLog.activity_id ? [{ activity_id: sourceLog.activity_id, hours: sourceLog.hours_billable }] : []),
+            position_ids: positionIds
+        });
+        setShowManpowerModal(true);
+    };
+
+    // Calculate default hours based on day of week
+    const getDefaultHours = (dateStr: string, workers: number): number => {
+        if (workers <= 0) return 0;
+        const date = new Date(dateStr);
+        const dayOfWeek = date.getDay(); // 0 = Sunday, 1 = Monday, ..., 5 = Friday, 6 = Saturday

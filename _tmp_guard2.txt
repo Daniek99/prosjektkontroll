@@ -1,0 +1,21 @@
+        setLoading(false);
+    };
+
+    if (selectedSubIds.length === 0) {
+        return (
+            <div className="flex flex-col items-center justify-center py-20 bg-white rounded-3xl border border-dashed border-slate-300">
+                <div className="bg-slate-50 p-6 rounded-full mb-6 ring-8 ring-slate-50/50">
+                    <ClipboardList className="w-16 h-16 text-slate-300" />
+                </div>
+                <h3 className="text-xl font-extrabold text-slate-700">Ingen underentreprenører valgt</h3>
+                <p className="text-slate-500 text-center mt-3 font-medium">Klikk "Velg UE" i toppen for å velge underentreprenører du vil vise mannskap for.</p>
+            </div>
+        );
+    }
+
+    const todayStr = (() => {
+        const now = new Date();
+        const year = now.getFullYear();
+        const month = String(now.getMonth() + 1).padStart(2, '0');
+        const day = String(now.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;

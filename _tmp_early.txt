@@ -1,0 +1,38 @@
+                
+                // Insert new positions
+                const positionInserts = newManpower.position_ids.map(areaId => ({
+                    daily_manpower_id: manpowerId,
+                    global_area_id: areaId
+                }));
+                await supabase.from('daily_manpower_positions').insert(positionInserts);
+            } else if (newManpower.id) {
+                // If editing and no positions selected, delete existing
+                await supabase.from('daily_manpower_positions').delete().eq('daily_manpower_id', manpowerId);
+            }
+            
+            let updatedManpower = [...manpower];
+            if (newManpower.id) {
+                updatedManpower = updatedManpower.map(m => m.id === newManpower.id ? data[0] : m);
+            } else {
+                updatedManpower = [data[0], ...updatedManpower];
+            }
+            setManpower(updatedManpower.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()));
+            // Sync the miniature overview data for this subcontractor
+            if (selectedSubcontractorId) {
+                setManpowerBySub(prev => {
+                    const list = prev[selectedSubcontractorId] || [];
+                    let updatedMulti: any[];
+                    if (newManpower.id) {
+                        updatedMulti = list.map(m => m.id === newManpower.id ? data[0] : m);
+                    } else {
+                        updatedMulti = [data[0], ...list];
+                    }
+                    return { ...prev, [selectedSubcontractorId]: updatedMulti };
+                });
+            }
+            setShowManpowerModal(false);
+            resetForm();
+        } else {
+            alert('Kunne ikke lagre mannskapslogg. Vennligst prøv igjen.');
+        }
+        setLoading(false);

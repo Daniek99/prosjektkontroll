@@ -123,7 +123,7 @@ export default function Diary() {
                     <BookOpen className="w-16 h-16 text-slate-300" />
                 </div>
                 <h3 className="text-xl font-extrabold text-slate-700">Ingen underentreprenør valgt</h3>
-                <p className="text-slate-500 text-center mt-3 font-medium">Vennligst velg en underentreprenør for å skrive i dagboken.</p>
+                <p className="text-slate-500 text-center mt-3 font-medium">Vennligst velg en underentreprenør for å skrive notater.</p>
             </div>
         );
     }
@@ -141,8 +141,8 @@ export default function Diary() {
         <div className="space-y-8 max-w-5xl mx-auto">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-6 rounded-3xl shadow-sm border border-slate-200/60">
                 <div>
-                    <h1 className="text-2xl font-extrabold text-slate-900 tracking-tight">Dagbok & Notater</h1>
-                    <p className="text-slate-500 font-medium text-sm mt-1">Løpende oppfølging av underentreprenøren</p>
+                    <h1 className="text-2xl font-extrabold text-slate-900 tracking-tight">Notater</h1>
+                    <p className="text-slate-500 font-medium text-sm mt-1">Løpende notater for underentreprenøren</p>
                 </div>
                 <button onClick={() => {
                     setNewEntry({
@@ -165,7 +165,7 @@ export default function Diary() {
                     <div className="p-12 flex justify-center"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"></div></div>
                 ) : entries.length === 0 ? (
                     <div className="bg-white p-12 text-center text-slate-500 font-medium border border-slate-200 rounded-3xl shadow-sm">
-                        Ingen dagboknotater funnet for denne underentreprenøren. Klikk "Nytt Notat" for å begynne.
+                        Ingen notater funnet for denne underentreprenøren. Klikk "Nytt Notat" for å begynne.
                     </div>
                 ) : (
                     <div className="space-y-6">
@@ -224,7 +224,7 @@ export default function Diary() {
                 <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm">
                     <div className="bg-white rounded-3xl w-full max-w-xl shadow-2xl overflow-hidden border border-slate-200">
                         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 bg-slate-50">
-                            <h3 className="text-lg font-extrabold text-slate-800">{newEntry.id ? 'Rediger Dagboknotat' : 'Skriv Dagboknotat'}</h3>
+                            <h3 className="text-lg font-extrabold text-slate-800">{newEntry.id ? 'Rediger notat' : 'Skriv notat'}</h3>
                             <button onClick={() => setShowModal(false)} className="text-slate-400 hover:text-red-500 p-1 rounded-lg transition-colors">
                                 <X className="w-5 h-5" />
                             </button>

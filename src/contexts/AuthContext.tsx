@@ -7,6 +7,9 @@ export type UserProfile = {
     email: string | null;
     full_name: string | null;
     role: 'master' | 'user';
+    // Personal "Notater" access. This belongs to the user profile rather than
+    // to a specific project, so it follows the user across all projects.
+    notes_access: boolean;
 };
 
 type AuthContextType = {
@@ -38,7 +41,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         setProfileLoading(true);
         const { data, error } = await supabase
             .from('user_profiles')
-            .select('id, email, full_name, role')
+            .select('id, email, full_name, role, notes_access')
             .eq('id', currentUser.id)
             .maybeSingle();
 

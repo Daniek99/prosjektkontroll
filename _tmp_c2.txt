@@ -1,0 +1,11 @@
+                {/* Recent Logs List */}
+                <div className="bg-white border border-slate-200/60 rounded-3xl shadow-sm flex flex-col h-[500px]">
+                    <div className="px-6 py-5 border-b border-slate-200/60 bg-slate-50/50 flex justify-between items-center rounded-t-3xl">
+                        <h3 className="font-extrabold text-slate-800 flex items-center">
+                            <Clock className="w-5 h-5 mr-2 text-slate-500" />
+                            Siste registreringer
+                        </h3>
+                    </div>
+                    <div className="flex-1 overflow-auto p-4 md:p-6 space-y-3">
+                        {manpower.length === 0 ? (
+                            <div className="text-center p-8 text-slate-500 font-medium">Ingen logger funnet.</div>

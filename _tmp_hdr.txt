@@ -1,0 +1,88 @@
+                        }}
+                        className="bg-amber-600 text-white px-4 py-2.5 rounded-xl font-bold text-sm shadow-[0_4px_12px_rgba(217,119,6,0.2)] hover:bg-amber-700 transition-colors shrink-0 flex items-center justify-center gap-1.5"
+                    >
+                        <Plus className="w-4 h-4" />
+                        Loggfør nå
+                    </button>
+                </div>
+            )}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-6 rounded-3xl shadow-sm border border-slate-200/60">
+                <div>
+                    <h1 className="text-2xl font-extrabold text-slate-900 tracking-tight">Bemanning</h1>
+                    <p className="text-slate-500 font-medium text-sm mt-1">Daglig mannskapslogg og personell</p>
+                </div>
+                <div className="flex gap-3">
+                    <button onClick={() => setShowActivityModal(true)} className="bg-slate-100 text-slate-700 px-4 py-2.5 rounded-xl font-bold text-sm hover:bg-slate-200 transition-colors flex items-center shrink-0">
+                        <Settings className="w-4 h-4 mr-2" />
+                        Administrer Aktiviteter
+                    </button>
+                    <button onClick={() => { resetForm(); setShowManpowerModal(true); }} className="bg-primary-600 text-white px-4 py-2.5 rounded-xl font-bold text-sm shadow-[0_4px_12px_rgba(37,99,235,0.25)] hover:bg-primary-700 transition-colors flex items-center shrink-0">
+                        <Plus className="w-4 h-4 mr-2" />
+                        Loggfør Mannskap
+                    </button>
+                </div>
+            </div>
+
+            <div>
+                {/* Manpower Weekly Calendar */}
+                <div className="bg-white border border-slate-200/60 rounded-3xl shadow-sm flex flex-col h-[500px]">
+                    <div className="px-6 py-5 border-b border-slate-200/60 bg-slate-50/50 flex justify-between items-center rounded-t-3xl">
+                        <h3 className="font-extrabold text-slate-800 flex items-center">
+                            <Users className="w-5 h-5 mr-2 text-primary-500" />
+                            Daglig Mannskap
+                        </h3>
+                        <div className="flex items-center space-x-4">
+                            <div className="flex bg-slate-200/50 p-1 rounded-lg">
+                                <button
+                                    onClick={() => setViewMode('week')}
+                                    className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all ${viewMode === 'week' ? 'bg-white shadow-sm text-slate-800' : 'text-slate-500 hover:text-slate-700'}`}
+                                >
+                                    Uke
+                                </button>
+                                <button
+                                    onClick={() => setViewMode('month')}
+                                    className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all ${viewMode === 'month' ? 'bg-white shadow-sm text-slate-800' : 'text-slate-500 hover:text-slate-700'}`}
+                                >
+                                    Måned
+                                </button>
+                            </div>
+
+                            {viewMode === 'week' ? (
+                                <div className="flex items-center space-x-2">
+                                    <button onClick={() => setCurrentWeekStart(new Date(currentWeekStart.getTime() - 7 * 24 * 60 * 60 * 1000))} className="p-1 text-slate-400 hover:text-primary-600 hover:bg-primary-50 rounded-lg transition-colors">
+                                        <ChevronLeft className="w-5 h-5" />
+                                    </button>
+                                    <span className="text-xs font-bold text-slate-600 uppercase tracking-widest min-w-[70px] text-center">
+                                        Uke {getWeekNumber(currentWeekStart)}
+                                    </span>
+                                    <button onClick={() => setCurrentWeekStart(new Date(currentWeekStart.getTime() + 7 * 24 * 60 * 60 * 1000))} className="p-1 text-slate-400 hover:text-primary-600 hover:bg-primary-50 rounded-lg transition-colors">
+                                        <ChevronRight className="w-5 h-5" />
+                                    </button>
+                                </div>
+                            ) : (
+                                <div className="flex items-center space-x-2">
+                                    <button onClick={() => setCurrentMonthStart(new Date(currentMonthStart.getFullYear(), currentMonthStart.getMonth() - 1, 1))} className="p-1 text-slate-400 hover:text-primary-600 hover:bg-primary-50 rounded-lg transition-colors">
+                                        <ChevronLeft className="w-5 h-5" />
+                                    </button>
+                                    <span className="text-xs font-bold text-slate-600 uppercase tracking-widest min-w-[100px] text-center">
+                                        {currentMonthStart.toLocaleDateString('no-NO', { month: 'long', year: 'numeric' })}
+                                    </span>
+                                    <button onClick={() => setCurrentMonthStart(new Date(currentMonthStart.getFullYear(), currentMonthStart.getMonth() + 1, 1))} className="p-1 text-slate-400 hover:text-primary-600 hover:bg-primary-50 rounded-lg transition-colors">
+                                        <ChevronRight className="w-5 h-5" />
+                                    </button>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                    <div className="flex-1 overflow-auto p-4 md:p-6 bg-slate-50/30">
+                        {loading ? (
+                            <div className="flex justify-center p-8"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"></div></div>
+                        ) : viewMode === 'week' ? (
+                            <div className="grid grid-cols-7 gap-2 h-full">
+                                {Array.from({ length: 7 }).map((_, i) => {
+                                    const date = new Date(currentWeekStart.getTime() + i * 24 * 60 * 60 * 1000);
+                                    const year = date.getFullYear();
+                                    const month = String(date.getMonth() + 1).padStart(2, '0');
+                                    const day = String(date.getDate()).padStart(2, '0');
+                                    const dateStr = `${year}-${month}-${day}`;
+                                    const logsForDay = manpower.filter(m => m.date === dateStr);

@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useState, useCallback } from 'react';
 import { supabase, setCurrentProjectId } from '../lib/supabase';
 import { useAuth } from './AuthContext';
-import type { DatasetKey } from '../lib/datasets';
+import { NOTES_DATASET_KEY, type DatasetKey } from '../lib/datasets';
 
 export type Project = {
     id: string;
@@ -24,6 +24,7 @@ type ProjectContextType = {
     refreshProjects: () => Promise<void>;
     createProject: (name: string, description?: string) => Promise<Project | null>;
     renameProject: (id: string, name: string) => Promise<boolean>;
+    updateProject: (id: string, name: string, description: string) => Promise<boolean>;
     needsNaming: boolean;
 };
 
@@ -32,7 +33,7 @@ const ProjectContext = createContext<ProjectContextType | undefined>(undefined);
 const STORAGE_KEY = 'gc-app-selected-project';
 
 export const ProjectProvider = ({ children }: { children: React.ReactNode }) => {
-    const { user, isMaster, loading: authLoading, profileLoading } = useAuth();
+    const { user, profile, isMaster, loading: authLoading, profileLoading } = useAuth();
     const [projects, setProjects] = useState<Project[]>([]);
     const [selectedProjectId, setSelectedProjectIdState] = useState<string | null>(null);
     const [permissions, setPermissions] = useState<Record<string, boolean>>({});
@@ -150,10 +151,39 @@ export const ProjectProvider = ({ children }: { children: React.ReactNode }) => 
         return true;
     }, []);
 
+    const updateProject = useCallback(async (id: string, name: string, description: string) => {
+        const normalizedName = name.trim();
+        const normalizedDescription = description.trim() || null;
+        if (!normalizedName) return false;
+
+        const { error } = await supabase
+            .from('projects')
+            .update({
+                name: normalizedName,
+                description: normalizedDescription,
+                is_default: false,
+                updated_at: new Date().toISOString(),
+            })
+            .eq('id', id);
+
+        if (error) {
+            console.error('Error updating project', error);
+            return false;
+        }
+
+        setProjects((prev) => prev.map((project) => project.id === id
+            ? { ...project, name: normalizedName, description: normalizedDescription, is_default: false }
+            : project));
+        return true;
+    }, []);
+
     const canAccess = useCallback((dataset: DatasetKey) => {
         if (isMaster) return true;
+        // "Notater" is a personal feature tied to the user's profile, not to
+        // the currently selected project.
+        if (dataset === NOTES_DATASET_KEY) return profile?.notes_access === true;
         return permissions[dataset] === true;
-    }, [isMaster, permissions]);
+    }, [isMaster, permissions, profile]);
 
     const selectedProject = projects.find((p) => p.id === selectedProjectId) ?? null;
     const needsNaming = isMaster && projects.some((p) => p.is_default);
@@ -175,6 +205,7 @@ export const ProjectProvider = ({ children }: { children: React.ReactNode }) => 
             refreshProjects,
             createProject,
             renameProject,
+            updateProject,
             needsNaming,
         }}>
             {gated ? (

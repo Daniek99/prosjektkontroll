@@ -3,7 +3,7 @@
 // users and to manage their project memberships and dataset permissions.
 //
 // Actions:
-//   invite          { email, fullName?, password?, projectIds[], datasets[] }
+//   invite          { email, fullName?, password?, projectIds[], datasets[], notesAccess? }
 //   delete          { userId }
 //   update_password { userId, password }
 
@@ -77,7 +77,7 @@ Deno.serve(async (req) => {
     }
 
     // invite / create
-    const { email, fullName, password, projectIds = [], datasets = [] } = body;
+    const { email, fullName, password, projectIds = [], datasets = [], notesAccess = false } = body;
     if (!email) return json({ error: 'email required' }, 400);
 
     let newUserId: string | undefined;
@@ -104,6 +104,9 @@ Deno.serve(async (req) => {
       email,
       full_name: fullName ?? null,
       role: 'user',
+      // "Notater" is a personal permission stored on the user profile, not a
+      // project-scoped dataset.
+      notes_access: notesAccess === true,
     });
 
     if (projectIds.length) {
@@ -122,8 +125,10 @@ Deno.serve(async (req) => {
         dataset: string;
         can_access: boolean;
       }> = [];
+      // "diary" (Notater) is user-level and must not be stored per project.
+      const projectDatasets = (datasets as string[]).filter((ds) => ds !== 'diary');
       for (const pid of projectIds) {
-        for (const ds of datasets) {
+        for (const ds of projectDatasets) {
           rows.push({ user_id: newUserId, project_id: pid, dataset: ds, can_access: true });
         }
       }

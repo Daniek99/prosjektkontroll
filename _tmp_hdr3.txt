@@ -1,0 +1,18 @@
+                            </p>
+                        </div>
+                    </div>
+                    <button
+                        onClick={() => {
+                            resetForm();
+                            setNewManpower(prev => ({
+                                ...prev,
+                                date: todayStr
+                            }));
+                            setShowManpowerModal(true);
+                        }}
+                        className="bg-amber-600 text-white px-4 py-2.5 rounded-xl font-bold text-sm shadow-[0_4px_12px_rgba(217,119,6,0.2)] hover:bg-amber-700 transition-colors shrink-0 flex items-center justify-center gap-1.5"
+                    >
+                        <Plus className="w-4 h-4" />
+                        Loggfør nå
+                    </button>
+                </div>

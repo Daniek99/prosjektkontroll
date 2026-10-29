@@ -1,0 +1,86 @@
+                                </div>
+                            );
+                            })
+                        )}
+                    </div>
+                </div>
+            </div>
+
+            {/* Miniature overview — compact week strips for all selected subcontractors, scrollable */}
+            {selectedSubIds.length > 0 && (
+                <div className="bg-white border border-slate-200/60 rounded-3xl shadow-sm p-4 md:p-6">
+                    <div className="flex items-center justify-between mb-4">
+                        <h3 className="font-extrabold text-slate-800 flex items-center">
+                            <Users className="w-5 h-5 mr-2 text-primary-500" />
+                            Mannskapsoversikt ({selectedSubIds.length})
+                        </h3>
+                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Uke {getWeekNumber(currentWeekStart)}</span>
+                    </div>
+                    <div className="space-y-2">
+                        {[...subcontractors].filter(s => selectedSubIds.includes(s.id)).sort((a, b) => {
+                            const aP = a.type === 'project' ? 1 : 0, bP = b.type === 'project' ? 1 : 0;
+                            if (aP !== bP) return aP - bP;
+                            return a.company_name.localeCompare(b.company_name, 'no');
+                        }).map(sub => {
+                            const subs = manpowerBySub[sub.id] || [];
+                            return (
+                                <div key={sub.id} className={`flex items-center gap-3 rounded-xl border p-2 ${sub.type === 'project' ? 'bg-purple-50/40 border-purple-200' : 'bg-slate-50 border-slate-200'}`}>
+                                    <div className="min-w-[160px] max-w-[200px] flex items-center gap-2">
+                                        <span className="text-xs font-bold text-slate-700 truncate">{sub.company_name}</span>
+                                        {sub.type === 'project' && <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-extrabold bg-purple-100 text-purple-700 border border-purple-200 shrink-0">Prosjekt</span>}
+                                    </div>
+                                    <div className="flex-1 grid grid-cols-7 gap-1">
+                                        {Array.from({ length: 7 }).map((_, i) => {
+                                            const date = new Date(currentWeekStart.getTime() + i * 24 * 60 * 60 * 1000);
+                                            const ds = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+                                            const log = subs.find(l => l.date === ds);
+                                            const total = log ? (log.workers_count || 0) : 0;
+                                            return (
+                                                <button key={ds} type="button" onClick={() => {
+                                                    setSelectedSubcontractorId(sub.id);
+                                                    setNewManpower({
+                                                        id: log?.id,
+                                                        date: ds,
+                                                        contract_workers: log?.contract_workers ?? '',
+                                                        billable_workers: log?.billable_workers ?? '',
+                                                        total_workers_per_day: log?.workers_count ?? '',
+                                                        notes: log?.notes || '',
+                                                        billable_comment: log?.billable_comment || log?.comment || '',
+                                                        billable_activities: log?.billable_activities || (log?.activity_id ? [{ activity_id: log.activity_id, hours: log.hours_billable }] : []),
+                                                        position_ids: log?.daily_manpower_positions?.map((p: any) => p.global_area_id) || []
+                                                    });
+                                                    setShowManpowerModal(true);
+                                                }} className={`text-center py-1.5 rounded-md text-[10px] font-bold border border-slate-200/60 ${total > 0 ? 'bg-primary-100 text-primary-700 hover:bg-primary-200' : 'bg-white text-slate-400 hover:bg-slate-100'}`}>
+                                                    <div className="text-[9px] text-slate-500 leading-none">{date.getDate()}</div>
+                                                    <div className="leading-none mt-0.5">{total > 0 ? total : '–'}</div>
+                                                </button>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+                            );
+                        })}
+                    </div>
+                </div>
+            )}
+
+            {/* Manpower Modal */}
+            {showManpowerModal && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm">
+                    <div className="bg-white rounded-3xl w-full max-w-lg shadow-2xl overflow-hidden border border-slate-200 flex flex-col max-h-[90vh]">
+                        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 bg-slate-50 shrink-0">
+                            <h3 className="text-lg font-extrabold text-slate-800">Loggfør Mannskap</h3>
+                            <button onClick={() => setShowManpowerModal(false)} className="text-slate-400 hover:text-red-500 p-1 rounded-lg transition-colors">
+                                <X className="w-5 h-5" />
+                            </button>
+                        </div>
+                        <form onSubmit={handleAddManpower} className="p-6 space-y-5 overflow-y-auto">
+                            <div>
+                                <label className="block text-sm font-bold text-slate-700 mb-1">Dato</label>
+                                <DatePickerWithWeek
+                                    selected={newManpower.date ? new Date(newManpower.date) : null}
+                                    onChange={(date) => {
+                                        const newDate = date ? date.toISOString().split('T')[0] : '';
+                                        setNewManpower({ ...newManpower, date: newDate, /* hours_billable removed */ });
+                                    }}
+                                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500 transition-all"
